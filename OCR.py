@@ -2,6 +2,7 @@ from __future__ import annotations
 import time
 import cv2
 import numpy as np
+import os
 from cv2.typing import MatLike
 from paddleocr import PaddleOCR
 from strsimpy import SorensenDice
@@ -147,8 +148,13 @@ class OCR:
             logger.error(f"OCR failed: {e}")
             # Reinit to avoid hard crash on next call due to corrupted C++ state
             self._reinit_paddleocr()
-            logger.error(f"Image stored to ocr_output folder.")
-            cv2.imwrite(f"./ocr_output/{name}", image)
+            try:
+                os.makedirs("./ocr_output", exist_ok=True)
+                file_name = f"{name}.png" if name else "ocr_error.png"
+                logger.error(f"Image stored to ocr_output folder as {file_name}.")
+                cv2.imwrite(f"./ocr_output/{file_name}", image)
+            except Exception as write_err:
+                logger.error(f"Failed to save image: {write_err}")
             return None, None
 
     def image_simple_ocr(self, image, name='') -> list[str] | None:
@@ -203,8 +209,13 @@ class OCR:
             logger.error(f"OCR failed: {e}")
             # Reinit to avoid hard crash on next call due to corrupted C++ state
             self._reinit_paddleocr()
-            logger.error(f"Image stored to ocr_output folder.")
-            cv2.imwrite(f"./ocr_output/{name}", image)
+            try:
+                os.makedirs("./ocr_output", exist_ok=True)
+                file_name = f"{name}.png" if name else "ocr_error.png"
+                logger.error(f"Image stored to ocr_output folder as {file_name}.")
+                cv2.imwrite(f"./ocr_output/{file_name}", image)
+            except Exception as write_err:
+                logger.error(f"Failed to save image: {write_err}")
             return None
 
     def get_highlighted_item_data(self, image, item: Quad, name=''):
