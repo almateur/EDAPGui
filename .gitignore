@@ -24,3 +24,7 @@ configs/ship_configs.json
 test/match/
 debug-output/
 runs/
+
+# Dashboard node_modules
+node_modules/
+dashboard/node_modules/
