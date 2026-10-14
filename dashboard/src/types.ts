@@ -44,12 +44,21 @@ export interface PongMessage {
   type: 'pong';
 }
 
+export interface ProcessStatusMessage {
+  type: 'process_status';
+  building: boolean;
+  running: boolean;
+  pid?: number;
+  message?: string;
+}
+
 export type ServerToClientMessage =
   | EngineStatusMessage
   | TelemetryMessage
   | LogMessage
   | ScreenshotMessage
-  | PongMessage;
+  | PongMessage
+  | ProcessStatusMessage;
 
 export interface CommandMessage {
   command: string;
