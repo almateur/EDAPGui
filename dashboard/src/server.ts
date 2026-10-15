@@ -307,6 +307,14 @@ wss.on('connection', (ws: WebSocket) => {
   };
   ws.send(JSON.stringify(statusMsg));
 
+  // Send current process status to newly connected client
+  ws.send(JSON.stringify({
+    type: 'process_status',
+    building: isBuildingPython,
+    running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+    pid: pythonBackendProcess?.pid || null
+  }));
+
   ws.on('message', (message: WebSocket.RawData) => {
     try {
       const parsed: CommandMessage = JSON.parse(message.toString());

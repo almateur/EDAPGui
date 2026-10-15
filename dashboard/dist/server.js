@@ -295,6 +295,13 @@ wss.on('connection', (ws) => {
         message: isEngineConnected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
     };
     ws.send(JSON.stringify(statusMsg));
+    // Send current process status to newly connected client
+    ws.send(JSON.stringify({
+        type: 'process_status',
+        building: isBuildingPython,
+        running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+        pid: pythonBackendProcess?.pid || null
+    }));
     ws.on('message', (message) => {
         try {
             const parsed = JSON.parse(message.toString());

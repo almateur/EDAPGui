@@ -3,8 +3,9 @@ import { ref, reactive, onMounted, computed, nextTick } from 'vue';
 import type { TelemetryData, ServerToClientMessage, CommandMessage } from './types';
 
 // Reactive state
+const isServerConnected = ref(false);
 const isConnected = ref(false);
-const statusMessage = ref('Connecting to Engine...');
+const statusMessage = ref('Connecting to Server...');
 const isBuildingPython = ref(false);
 const isBackendRunning = ref(false);
 const backendPid = ref<number | null>(null);
@@ -54,6 +55,7 @@ function initWebSocket(): void {
 
   ws.onopen = () => {
     console.log('[Vue Dashboard] Connected to server.');
+    isServerConnected.value = true;
   };
 
   ws.onmessage = (event: MessageEvent) => {
@@ -66,6 +68,7 @@ function initWebSocket(): void {
   };
 
   ws.onclose = () => {
+    isServerConnected.value = false;
     isConnected.value = false;
     statusMessage.value = 'Disconnected from Server';
     setTimeout(initWebSocket, 3000);
@@ -117,7 +120,13 @@ function sendCommand(command: string, extraData: Record<string, any> = {}): void
     const payload: CommandMessage = { command, ...extraData };
     ws.send(JSON.stringify(payload));
   } else {
-    appendLog(new Date().toLocaleTimeString(), 'Error: Cannot send command, WebSocket disconnected.');
+    appendLog(
+      new Date().toLocaleTimeString(),
+      'Error: Cannot send command, WebSocket disconnected. Attempting to reconnect...'
+    );
+    if (!ws || ws.readyState === WebSocket.CLOSED) {
+      initWebSocket();
+    }
   }
 }
 
