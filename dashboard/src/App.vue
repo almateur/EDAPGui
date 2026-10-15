@@ -5,6 +5,9 @@ import type { TelemetryData, ServerToClientMessage, CommandMessage } from './typ
 // Reactive state
 const isConnected = ref(false);
 const statusMessage = ref('Connecting to Engine...');
+const isBuildingPython = ref(false);
+const isBackendRunning = ref(false);
+const backendPid = ref<number | null>(null);
 const debugStreamActive = ref(false);
 const debugImageSrc = ref('');
 const waypointFilepath = ref('waypoints/route.json');
@@ -77,6 +80,13 @@ function handleServerMessage(msg: ServerToClientMessage): void {
   if (msg.type === 'engine_status') {
     isConnected.value = msg.connected;
     statusMessage.value = msg.message;
+  } else if (msg.type === 'process_status') {
+    isBuildingPython.value = msg.building;
+    isBackendRunning.value = msg.running;
+    backendPid.value = msg.pid || null;
+    if (msg.message) {
+      appendLog(new Date().toLocaleTimeString(), `[Engine Manager] ${msg.message}`, true);
+    }
   } else if (msg.type === 'telemetry') {
     Object.assign(telemetry, msg.data);
   } else if (msg.type === 'log') {
@@ -109,6 +119,21 @@ function sendCommand(command: string, extraData: Record<string, any> = {}): void
   } else {
     appendLog(new Date().toLocaleTimeString(), 'Error: Cannot send command, WebSocket disconnected.');
   }
+}
+
+function buildPythonEngine(): void {
+  appendLog(new Date().toLocaleTimeString(), 'Initiating Python build & dependency setup...', true);
+  sendCommand('build_python');
+}
+
+function startPythonBackend(): void {
+  appendLog(new Date().toLocaleTimeString(), 'Starting Python Backend Server process...', true);
+  sendCommand('start_python_backend');
+}
+
+function stopPythonBackend(): void {
+  appendLog(new Date().toLocaleTimeString(), 'Stopping Python Backend Server process...', true);
+  sendCommand('stop_python_backend');
 }
 
 function toggleAssist(assistName: string): void {
@@ -162,6 +187,49 @@ onMounted(() => {
     <main class="dashboard-grid">
       <!-- Left Column: Telemetry & Controls -->
       <section class="left-panel">
+        <!-- Python Engine & Process Management Card -->
+        <div class="card engine-card">
+          <h2><span class="icon">⚙️</span> Python Engine Manager</h2>
+          <div class="engine-status-row">
+            <span class="label">Backend Process:</span>
+            <span :class="['badge-status', isBackendRunning ? 'status-running' : 'status-stopped']">
+              {{ isBackendRunning ? `Running (PID: ${backendPid})` : 'Stopped' }}
+            </span>
+            <span v-if="isBuildingPython" class="badge-status status-building">
+              🔨 Building Environment...
+            </span>
+          </div>
+          <div class="engine-buttons-grid">
+            <button
+              class="btn btn-secondary"
+              :disabled="isBuildingPython"
+              @click="buildPythonEngine"
+            >
+              <span class="btn-icon">📦</span>
+              <span class="btn-text">{{ isBuildingPython ? 'Building...' : 'Build Python Env' }}</span>
+            </button>
+
+            <button
+              v-if="!isBackendRunning"
+              class="btn btn-accent"
+              :disabled="isBuildingPython"
+              @click="startPythonBackend"
+            >
+              <span class="btn-icon">▶️</span>
+              <span class="btn-text">Start Python Backend</span>
+            </button>
+
+            <button
+              v-else
+              class="btn btn-danger"
+              @click="stopPythonBackend"
+            >
+              <span class="btn-icon">⏹️</span>
+              <span class="btn-text">Stop Python Backend</span>
+            </button>
+          </div>
+        </div>
+
         <!-- Telemetry Card -->
         <div class="card telemetry-card">
           <h2><span class="icon">📊</span> Telemetry & State</h2>
