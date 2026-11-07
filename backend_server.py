@@ -12,6 +12,7 @@ import json
 import os
 import logging
 from datetime import datetime
+from pathlib import Path
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -29,7 +30,21 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("EDAP_Backend")
 
 PORT = int(os.environ.get("EDAP_PORT", 8765))
-HOST = os.environ.get("EDAP_HOST", "0.0.0.0")
+HOST = os.environ.get("EDAP_HOST", "127.0.0.1")
+WAYPOINT_DIR = Path(__file__).resolve().parent / "waypoints"
+
+
+def resolve_waypoint_file(filepath):
+    """Network clients may load only JSON files within the waypoint directory."""
+    if not isinstance(filepath, str) or not filepath or len(filepath) > 1024:
+        raise ValueError("A waypoint JSON path is required")
+    root = WAYPOINT_DIR.resolve()
+    candidate = (root.parent / filepath).resolve()
+    if not candidate.is_relative_to(root) or candidate.suffix.lower() != ".json":
+        raise ValueError("Waypoint files must be JSON files inside waypoints/")
+    if not candidate.is_file() or candidate.stat().st_size > 1024 * 1024:
+        raise ValueError("Waypoint file is missing or larger than 1 MiB")
+    return candidate
 
 class EDAPEngineServer:
     def __init__(self):
@@ -162,6 +177,8 @@ class EDAPEngineServer:
         if not isinstance(data, dict):
             raise ValueError("Command must be a JSON object")
         cmd = data.get("command")
+        if not isinstance(cmd, str):
+            raise ValueError("Command must be a string")
         logger.info(f"Received command: {cmd}")
 
         if not cmd:
@@ -246,7 +263,7 @@ class EDAPEngineServer:
             await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": "Command: Stop All Assists"})
 
         elif cmd == "load_waypoint_file":
-            filepath = data.get("filepath", "")
+            filepath = str(resolve_waypoint_file(data.get("filepath")))
             if self.ed_ap and hasattr(self.ed_ap, "waypoint") and filepath:
                 self.ed_ap.waypoint.load_waypoint_file(filepath)
             await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": f"Loaded waypoint file: {filepath}"})
@@ -285,13 +302,20 @@ class EDAPEngineServer:
             logger.info(f"Client disconnected. Total clients: {len(self.connected_clients)}")
 
     async def main(self):
+        if HOST not in {"127.0.0.1", "::1", "localhost"}:
+            raise ValueError("EDAP_HOST must be a loopback address; remote control is unsupported")
         self.loop = asyncio.get_running_loop()
         self.init_engine()
 
         telemetry_task = asyncio.create_task(self.periodic_telemetry_and_screenshots())
         try:
             logger.info(f"Starting Python Engine WebSocket Server on {HOST}:{PORT}...")
-            async with websockets.serve(self.client_handler, HOST, PORT):
+            # Only the local dashboard talks to this socket. Browsers always
+            # supply Origin and must use the dashboard's checked WebSocket.
+            async with websockets.serve(
+                self.client_handler, HOST, PORT, origins=[None],
+                max_size=64 * 1024, max_queue=16,
+            ):
                 await asyncio.Future()  # run forever
         finally:
             telemetry_task.cancel()

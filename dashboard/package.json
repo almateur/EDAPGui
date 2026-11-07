@@ -9,20 +9,24 @@
     "build:server": "tsc -p tsconfig.server.json",
     "build": "npm run build:client && npm run build:server",
     "server": "node dist/server.js",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && npm run server",
+    "test": "npm run build:server && node --test tests/*.test.js"
   },
   "dependencies": {
-    "express": "4.21.1",
-    "vue": "3.4.27",
-    "ws": "8.17.1"
+    "express": "4.22.3",
+    "vue": "3.5.45",
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@types/express": "4.17.21",
-    "@types/node": "20.12.12",
+    "@types/node": "20.19.43",
     "@types/ws": "8.5.10",
-    "@vitejs/plugin-vue": "5.0.4",
-    "typescript": "5.4.5",
-    "vite": "5.2.14",
-    "vue-tsc": "2.0.19"
+    "@vitejs/plugin-vue": "6.0.10",
+    "typescript": "5.9.3",
+    "vite": "7.3.7",
+    "vue-tsc": "3.3.14"
+  },
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
   }
 }

@@ -180,7 +180,7 @@ If you install a new version, copy the **Configs** folder from the old version t
 
 The repository also includes a Vue/TypeScript dashboard in `dashboard/` and a Python WebSocket backend in `backend_server.py`. Live autopilot control still requires Windows, Elite Dangerous, and the full Python dependencies described above. On Linux, the backend can run in its built-in mock mode when the autopilot dependencies cannot be imported. This supports dashboard and protocol development; it does not validate flight control, OCR, or live screenshots.
 
-Use Node.js with npm (validated with Node.js 24 and npm 11). For Linux dashboard development, create a minimal Python environment from the repository root:
+Use Node.js 20.19+ or 22.12+ with npm (validated with Node.js 24 and npm 11). For Linux dashboard development, create a minimal Python environment from the repository root:
 
 ```sh
 python3 -m venv venv
@@ -208,10 +208,26 @@ Configuration is optional for the default local setup:
 |----------|---------|---------|
 | `PORT` | `3000` | Dashboard HTTP and browser WebSocket port |
 | `ENGINE_WS_URL` | `ws://127.0.0.1:8765` | Backend address used by the dashboard server |
-| `EDAP_HOST` | `0.0.0.0` | Python backend bind address |
+| `EDAP_HOST` | `127.0.0.1` | Python backend bind address; loopback addresses only |
 | `EDAP_PORT` | `8765` | Python backend WebSocket port |
 
 Set these in the dashboard process environment so its Python child inherits them. If changing `EDAP_PORT`, update `ENGINE_WS_URL` to match. The backend can also run separately with `python backend_server.py`; in that case, its process is managed separately from the dashboard's start/stop controls.
+
+### Local control security
+
+The dashboard binds to `127.0.0.1`; the Python backend also defaults to loopback and rejects public bind addresses. These services trust local processes and do not provide remote-user authentication. Do not expose them through a reverse proxy, tunnel, or port forward. Remote access requires a separate authenticated design.
+
+The dashboard checks the request Host and requires a matching Origin for browser WebSockets and state-changing HTTP requests. Requests from other websites, opaque origins, or unexpected hostnames are rejected. Command-line clients must also send the dashboard's origin, for example:
+
+```sh
+curl --fail --request POST --header 'Origin: http://127.0.0.1:3000' http://127.0.0.1:3000/api/python/start
+```
+
+Native WebSocket clients connecting to the dashboard must set `Origin: http://127.0.0.1:3000` (adjust the port and loopback hostname to match their connection). The Python engine accepts only native connections without an Origin header; browsers must go through the dashboard. Control messages are limited to 64 KiB.
+
+The network waypoint loader accepts only existing `.json` files under the repository's `waypoints/` directory, up to 1 MiB. Parent-directory traversal and symlinks pointing outside that directory are rejected. This restriction applies to the WebSocket backend; the desktop file picker is unchanged.
+
+See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 
 ### Development checks
 
@@ -221,13 +237,15 @@ From the repository root, run the backend lifecycle regression suite using the P
 venv/bin/python -m unittest discover -s tests -v
 ```
 
-On Windows, use `venv\Scripts\python.exe` in place of `venv/bin/python`. This suite contains three tests and needs neither Windows nor the game. The root-level `test_*.py` scripts and `Test_Routines.py` are separate game/desktop checks; they are not a headless unit-test suite.
+On Windows, use `venv\Scripts\python.exe` in place of `venv/bin/python`. This suite includes lifecycle and network security regression tests and needs neither Windows nor the game. The root-level `test_*.py` scripts and `Test_Routines.py` are separate game/desktop checks; they are not a headless unit-test suite.
 
 From `dashboard/`, validate both builds and Vue types:
 
 ```sh
 npm run build
 npx --no-install vue-tsc --noEmit
+npm test
+npm audit
 ```
 
 Builds write to `dashboard/dist/` and `dashboard/dist-client/`, which contain tracked generated files. Review generated changes before committing. Cloud onboarding builds to an external runtime directory to preserve those files.

@@ -15,13 +15,23 @@ var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (
 }) : function(o, v) {
     o["default"] = v;
 });
-var __importStar = (this && this.__importStar) || function (mod) {
-    if (mod && mod.__esModule) return mod;
-    var result = {};
-    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
-    __setModuleDefault(result, mod);
-    return result;
-};
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -32,11 +42,14 @@ const path_1 = __importDefault(require("path"));
 const fs_1 = __importDefault(require("fs"));
 const child_process_1 = require("child_process");
 const ws_1 = __importStar(require("ws"));
+const security_1 = require("../security");
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
 const ROOT_DIR = path_1.default.resolve(__dirname, '../../');
 const app = (0, express_1.default)();
 const server = http_1.default.createServer(app);
+const localAccess = (0, security_1.createLocalAccess)(server);
+app.use(localAccess.middleware);
 // Python process state
 let isBuildingPython = false;
 let pythonBackendProcess = null;
@@ -53,7 +66,7 @@ function broadcastProcessStatus(extraMessage) {
     broadcastToClients({
         type: 'process_status',
         building: isBuildingPython,
-        running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+        running: pythonBackendProcess !== null,
         pid: pythonBackendProcess?.pid,
         message: extraMessage
     });
@@ -127,7 +140,7 @@ function buildPythonEnvironment(res) {
     }
 }
 function startPythonBackend(res) {
-    if (pythonBackendProcess && !pythonBackendProcess.killed) {
+    if (pythonBackendProcess) {
         const msg = 'Python backend server is already running.';
         if (res)
             res.status(400).json({ error: msg });
@@ -142,6 +155,7 @@ function startPythonBackend(res) {
             cwd: ROOT_DIR,
             env: { ...process.env, PYTHONUNBUFFERED: '1' }
         });
+        const child = pythonBackendProcess;
         broadcastProcessStatus('Python backend server starting...');
         pythonBackendProcess.stdout?.on('data', (data) => {
             const lines = data.toString().split('\n');
@@ -161,12 +175,14 @@ function startPythonBackend(res) {
         });
         pythonBackendProcess.on('error', (err) => {
             logAndBroadcast(`[Python Backend] Failed to launch process: ${err.message}`);
-            pythonBackendProcess = null;
+            if (pythonBackendProcess === child)
+                pythonBackendProcess = null;
             broadcastProcessStatus(`Failed to launch backend: ${err.message}`);
         });
         pythonBackendProcess.on('close', (code) => {
             logAndBroadcast(`[Python Backend] Process exited with code ${code}`);
-            pythonBackendProcess = null;
+            if (pythonBackendProcess === child)
+                pythonBackendProcess = null;
             broadcastProcessStatus(`Backend process exited with code ${code}`);
         });
         if (res) {
@@ -181,7 +197,7 @@ function startPythonBackend(res) {
     }
 }
 function stopPythonBackend(res) {
-    if (!pythonBackendProcess || pythonBackendProcess.killed) {
+    if (!pythonBackendProcess) {
         const msg = 'Python backend process is not currently running.';
         if (res)
             res.status(400).json({ error: msg });
@@ -189,18 +205,20 @@ function stopPythonBackend(res) {
         return;
     }
     logAndBroadcast('=== Stopping Python Backend Server ===');
-    pythonBackendProcess.kill('SIGTERM');
-    setTimeout(() => {
-        if (pythonBackendProcess && !pythonBackendProcess.killed) {
+    const child = pythonBackendProcess;
+    child.kill('SIGTERM');
+    // killed only means a signal was sent; wait for close to establish exit.
+    const killTimer = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) {
             logAndBroadcast('Force killing Python Backend Server...');
-            pythonBackendProcess.kill('SIGKILL');
-        }
-        pythonBackendProcess = null;
-        broadcastProcessStatus('Python backend stopped');
-        if (res) {
-            res.json({ status: 'stopped', message: 'Python backend stopped.' });
+            child.kill('SIGKILL');
         }
     }, 1000);
+    child.once('close', () => {
+        clearTimeout(killTimer);
+        if (res)
+            res.json({ status: 'stopped', message: 'Python backend stopped.' });
+    });
 }
 // Serve static compiled Vue frontend assets
 const publicPath = path_1.default.join(__dirname, '../dist-client');
@@ -216,7 +234,7 @@ app.get('/api/health', (_req, res) => {
 app.get('/api/python/status', (_req, res) => {
     res.json({
         building: isBuildingPython,
-        running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+        running: pythonBackendProcess !== null,
         pid: pythonBackendProcess?.pid || null
     });
 });
@@ -230,7 +248,11 @@ app.post('/api/python/stop', (_req, res) => {
     stopPythonBackend(res);
 });
 // WebSocket Server for Dashboard frontend browser clients
-const wss = new ws_1.WebSocketServer({ server });
+const wss = new ws_1.WebSocketServer({
+    server,
+    maxPayload: 64 * 1024,
+    verifyClient: (info) => localAccess.isAllowed(info.req, true)
+});
 let engineWs = null;
 let reconnectTimer = null;
 function connectToPythonEngine() {
@@ -298,7 +320,10 @@ wss.on('connection', (ws) => {
     ws.on('message', (message) => {
         try {
             const parsed = JSON.parse(message.toString());
-            console.log('[Dashboard TS Server] Client command:', parsed);
+            if (!parsed || Array.isArray(parsed) || typeof parsed.command !== 'string') {
+                throw new Error('Command must be a JSON object with a command string');
+            }
+            console.log('[Dashboard TS Server] Client command:', parsed.command);
             if (parsed.command === 'build_python') {
                 buildPythonEnvironment();
             }
@@ -327,9 +352,12 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         console.log('[Dashboard TS Server] Browser client disconnected.');
     });
+    ws.on('error', (err) => {
+        console.warn('[Dashboard TS Server] Browser WebSocket error:', err.message);
+    });
 });
 // Start connecting to Python engine
 connectToPythonEngine();
-server.listen(APP_PORT, () => {
+server.listen(Number(APP_PORT), '127.0.0.1', () => {
     console.log(`[Dashboard TS Server] Vue.js/TS Dashboard UI running on http://localhost:${APP_PORT}`);
 });
