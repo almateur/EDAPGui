@@ -90,7 +90,7 @@ Aids with colonization construction projects, determining what commodities are n
 # Installation
 _Requires **python 3** and **git**_
 
-_Python 3.11.9 is the recommended version of Python. Python 3.9 or 3.10 may also be used._
+_Python 3.11.9 is the recommended version of Python. The current requirements need Python 3.11 or newer: the pinned pandas 3.0.3 package requires it. Python 3.9 and 3.10 are no longer compatible with the full requirements file._
 If you don't have Python installed:
 * Here is a link to [Python 3.11.9 installer](https://www.python.org/downloads/release/python-3119/). 
 * Scroll to the bottom and select the installer with the description "Recommended".
@@ -148,6 +148,64 @@ pipdeptree
 
 ## Upgrading EDAP Versions
 If you install a new version, copy the **Configs** folder from the old version to the new version to retain the settings you have configured. Refer to the release notes to identify and configuration that needs to be changed for that version upgrade.
+
+## Dashboard and backend development
+
+The repository also includes a Vue/TypeScript dashboard in `dashboard/` and a Python WebSocket backend in `backend_server.py`. Live autopilot control still requires Windows, Elite Dangerous, and the full Python dependencies described above. On Linux, the backend can run in its built-in mock mode when the autopilot dependencies cannot be imported. This supports dashboard and protocol development; it does not validate flight control, OCR, or live screenshots.
+
+Use Node.js with npm (validated with Node.js 24 and npm 11). For Linux dashboard development, create a minimal Python environment from the repository root:
+
+```sh
+python3 -m venv venv
+venv/bin/python -m pip install websockets==15.0.1
+```
+
+On Windows, use the full Python environment from the installation steps above. The dashboard looks for `venv/Scripts/python.exe`, then `venv/bin/python`, then the system Python executable when starting the backend.
+
+Build and start the dashboard:
+
+```sh
+cd dashboard
+npm ci
+npm run build
+npm run server
+```
+
+The dashboard listens on port 3000. Select **Start Python Backend** in the dashboard to start the Python process, then wait for **Connected to EDAP Python Engine**. In mock mode, assist buttons update simulated state and logs; ship/system values remain unknown. **Stop Python Backend** stops the managed process.
+
+The **Build Python Env** button installs the full `requirements.txt`, including Windows-specific packages. For Linux mock development, use the minimal environment above instead of that button. `npm run dev` starts the Vite frontend on port 5173, but it has no configured API/WebSocket proxy; use the compiled Express server for the complete dashboard/backend workflow.
+
+Configuration is optional for the default local setup:
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `3000` | Dashboard HTTP and browser WebSocket port |
+| `ENGINE_WS_URL` | `ws://127.0.0.1:8765` | Backend address used by the dashboard server |
+| `EDAP_HOST` | `0.0.0.0` | Python backend bind address |
+| `EDAP_PORT` | `8765` | Python backend WebSocket port |
+
+Set these in the dashboard process environment so its Python child inherits them. If changing `EDAP_PORT`, update `ENGINE_WS_URL` to match. The backend can also run separately with `python backend_server.py`; in that case, its process is managed separately from the dashboard's start/stop controls.
+
+### Development checks
+
+From the repository root, run the backend lifecycle regression suite using the Python environment with `websockets` installed:
+
+```sh
+venv/bin/python -m unittest discover -s tests -v
+```
+
+On Windows, use `venv\Scripts\python.exe` in place of `venv/bin/python`. This suite contains three tests and needs neither Windows nor the game. The root-level `test_*.py` scripts and `Test_Routines.py` are separate game/desktop checks; they are not a headless unit-test suite.
+
+From `dashboard/`, validate both builds and Vue types:
+
+```sh
+npm run build
+npx --no-install vue-tsc --noEmit
+```
+
+Builds write to `dashboard/dist/` and `dashboard/dist-client/`, which contain tracked generated files. Review generated changes before committing. Cloud onboarding builds to an external runtime directory to preserve those files.
+
+For a functional smoke check, request `/api/health` and `/api/python/status` on the dashboard server, then start the backend and verify telemetry, an assist toggle, **STOP ALL ASSISTS**, and backend stop/restart in the browser. A WebSocket command `{"command":"ping"}` sent to the dashboard should receive `{"type":"pong"}` through the Python backend. A healthy HTTP response alone does not verify the backend connection.
 
 # Running ED_AP
 * With Elite Dangerous (ED) running, start ED_AP:
