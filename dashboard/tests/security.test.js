@@ -153,6 +153,25 @@ for (const entry of ['dist/server.js', 'server.js']) {
     });
 
     if (entry === 'dist/server.js') {
+      await t.test('calibration status reaches current browsers and is restored after a page reload', async () => {
+        const first = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => first.terminate());
+        await waitForMessage(first, msg => msg.type === 'process_status');
+        const status = {
+          type: 'calibration_status', state: 'incomplete', message: 'Screen calibration is incomplete.',
+          issues: ['EDGalaxyMap.full_panel: invalid or empty bounds.'], blocked_assists: ['waypoint'],
+          restart_required: false, mock: false, file: 'configs/ocr_calibration.json', help: 'Save All Calibrations and restart Python.'
+        };
+        const received = waitForMessage(first, msg => msg.type === 'calibration_status');
+        for (const peer of engine.clients) peer.send(JSON.stringify(status));
+        assert.deepEqual(await received, status);
+        const second = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => second.terminate());
+        assert.deepEqual(await waitForMessage(second, msg => msg.type === 'calibration_status'), status);
+        first.terminate();
+        second.terminate();
+      });
+
       await t.test('waypoint imports require same-origin JSON and enforce the file limit', async () => {
         assert.equal(await requestStatus(`${origin}/api/waypoints/import`, {}, 'POST'), 403);
         const headers = { Origin: origin, 'Content-Type': 'application/json' };

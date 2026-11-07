@@ -1,11 +1,14 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
 import WaypointRouteEditor from './WaypointRouteEditor.vue';
+import CalibrationStatus from './CalibrationStatus.vue';
 import { parseWaypointRoute, serializeWaypointRoute, MAX_WAYPOINT_BYTES, type WaypointRoute } from './waypointRoute';
-import type { TelemetryData, ServerToClientMessage, CommandMessage } from './types';
+import type { TelemetryData, ServerToClientMessage, CommandMessage, CalibrationStatusMessage } from './types';
 
 // Reactive state
 const isConnected = ref(false);
+const calibrationStatus = ref<CalibrationStatusMessage | null>(null);
+const assistError = ref('');
 const statusMessage = ref('Connecting to Engine...');
 const isBuildingPython = ref(false);
 const isBackendRunning = ref(false);
@@ -97,6 +100,7 @@ function initWebSocket(): void {
   ws.onclose = () => {
     if (pendingWaypointRequest) finishWaypointLoad('Connection lost before the waypoint file was loaded.', true);
     isConnected.value = false;
+    calibrationStatus.value = null;
     hasProcessStatus.value = false;
     isBackendRunning.value = false;
     isBackendManaged.value = false;
@@ -114,7 +118,15 @@ function handleServerMessage(msg: ServerToClientMessage): void {
   if (msg.type === 'engine_status') {
     isConnected.value = msg.connected;
     statusMessage.value = msg.message;
+    if (!msg.connected) calibrationStatus.value = null;
+    else if (!calibrationStatus.value) sendCommand('check_calibration');
     if (!msg.connected && pendingWaypointRequest) finishWaypointLoad('The Python backend disconnected before loading the file.', true);
+  } else if (msg.type === 'calibration_status') {
+    calibrationStatus.value = msg;
+    if (msg.state === 'ready') assistError.value = '';
+  } else if (msg.type === 'command_error') {
+    assistError.value = msg.message;
+    appendLog(new Date().toLocaleTimeString(), msg.message, true);
   } else if (msg.type === 'process_status') {
     hasProcessStatus.value = true;
     isBuildingPython.value = msg.building;
@@ -182,6 +194,7 @@ function stopPythonBackend(): void {
 }
 
 function toggleAssist(assistName: string): void {
+  assistError.value = '';
   const isCurrentlyActive = telemetry.assists[assistName] || false;
   const cmd = isCurrentlyActive ? `stop_${assistName}` : `start_${assistName}`;
   sendCommand(cmd);
@@ -189,6 +202,12 @@ function toggleAssist(assistName: string): void {
 
 function stopAllAssists(): void {
   sendCommand('stop_all_assists');
+}
+
+function assistStartDisabled(name: string): boolean {
+  if (telemetry.assists[name]) return false; // A stop must always remain available.
+  if (!isConnected.value) return true;
+  return !calibrationStatus.value || calibrationStatus.value.blocked_assists.includes(name);
 }
 
 function loadWaypointFile(): void {
@@ -322,6 +341,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
 
     <!-- Dashboard Content Grid -->
     <main class="dashboard-grid">
+      <CalibrationStatus :status="calibrationStatus" :connected="isConnected" @recheck="sendCommand('check_calibration')" />
       <!-- Left Column: Telemetry & Controls -->
       <section class="left-panel">
         <!-- Python Engine & Process Management Card -->
@@ -405,10 +425,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
         <!-- Control Panel Card -->
         <div class="card control-card">
           <h2><span class="icon">🎮</span> Autopilot Assists Control Panel</h2>
+          <p v-if="assistError" class="assist-error" role="alert">{{ assistError }}</p>
           <div class="control-buttons-grid">
             <button
               :class="['btn', 'btn-primary', { active: telemetry.assists.waypoint }]"
               @click="toggleAssist('waypoint')"
+              :disabled="assistStartDisabled('waypoint')"
             >
               <span class="btn-icon">📍</span>
               <span class="btn-text">{{ telemetry.assists.waypoint ? 'Stop Waypoint Assist' : 'Start Waypoint Assist' }}</span>
@@ -417,6 +439,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
             <button
               :class="['btn', 'btn-primary', { active: telemetry.assists.fsd }]"
               @click="toggleAssist('fsd')"
+              :disabled="assistStartDisabled('fsd')"
             >
               <span class="btn-icon">🌌</span>
               <span class="btn-text">{{ telemetry.assists.fsd ? 'Stop FSD Assist' : 'Start FSD Assist' }}</span>
@@ -425,6 +448,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
             <button
               :class="['btn', 'btn-primary', { active: telemetry.assists.sc }]"
               @click="toggleAssist('sc')"
+              :disabled="assistStartDisabled('sc')"
             >
               <span class="btn-icon">💫</span>
               <span class="btn-text">{{ telemetry.assists.sc ? 'Stop SC Assist' : 'Start SC Assist' }}</span>
@@ -433,6 +457,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
             <button
               :class="['btn', 'btn-secondary', { active: telemetry.assists.robigo }]"
               @click="toggleAssist('robigo')"
+              :disabled="assistStartDisabled('robigo')"
             >
               <span class="btn-icon">🛸</span>
               <span class="btn-text">{{ telemetry.assists.robigo ? 'Stop Robigo Assist' : 'Start Robigo Assist' }}</span>
@@ -522,6 +547,8 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
 </template>
 
 <style scoped>
+.control-card button:disabled { opacity: .45; cursor: not-allowed; }
+.assist-error { color: var(--accent-red); margin-bottom: 12px; overflow-wrap: anywhere; }
 .waypoint-card { grid-column: 1 / -1; min-width: 0; }
 .route-state { color: var(--text-muted); font-size: .8rem; }
 .waypoint-card :deep(button:disabled) { opacity: .45; cursor: not-allowed; }

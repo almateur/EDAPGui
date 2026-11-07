@@ -311,6 +311,7 @@ const wss = new ws_1.WebSocketServer({
     verifyClient: (info) => localAccess.isAllowed(info.req, true)
 });
 let engineWs = null;
+let calibrationStatus = null;
 let reconnectTimer = null;
 function connectToPythonEngine() {
     console.log(`[Dashboard TS Server] Connecting to Python Engine WebSocket at ${ENGINE_WS_URL}...`);
@@ -331,6 +332,8 @@ function connectToPythonEngine() {
     engineWs.on('message', (data) => {
         try {
             const parsed = JSON.parse(data.toString());
+            if (parsed.type === 'calibration_status')
+                calibrationStatus = parsed;
             broadcastToClients(parsed);
         }
         catch (err) {
@@ -338,6 +341,7 @@ function connectToPythonEngine() {
         }
     });
     engineWs.on('close', () => {
+        calibrationStatus = null;
         console.log('[Dashboard TS Server] Disconnected from Python Engine. Retrying in 3s...');
         broadcastToClients({
             type: 'engine_status',
@@ -377,6 +381,8 @@ wss.on('connection', (ws) => {
     };
     ws.send(JSON.stringify(statusMsg));
     ws.send(JSON.stringify(getProcessStatus()));
+    if (connected && calibrationStatus)
+        ws.send(JSON.stringify(calibrationStatus));
     ws.on('message', (message) => {
         try {
             const parsed = JSON.parse(message.toString());

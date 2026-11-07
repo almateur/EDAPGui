@@ -254,11 +254,22 @@ class Screen:
         @param y_bot:
         @param rgb: Returns RGB when true, else BGR when false.
         """
+        width, height = int(x_right - x_left), int(y_bot - y_top)
+        if width <= 0 or height <= 0:
+            self._warn_capture_failure(
+                f"Capture region is empty or reversed ({x_left}, {y_top}, {x_right}, {y_bot}). "
+                "Screen calibration is missing or invalid. Open the desktop app's Calibration tab, "
+                "calibrate the cockpit and Codex regions, click Save All Calibrations, and restart the Python backend."
+            )
+            return None
+        if self.mon is None:
+            self._warn_capture_failure('No capture monitor is available. Keep Elite Dangerous visible in Borderless mode and restart EDAP.')
+            return None
         monitor = {
             "top": self.mon["top"] + int(y_top),
             "left": self.mon["left"] + int(x_left),
-            "width": int(x_right - x_left),
-            "height": int(y_bot - y_top),
+            "width": width,
+            "height": height,
             "mon": self.monitor_number,
         }
         try:

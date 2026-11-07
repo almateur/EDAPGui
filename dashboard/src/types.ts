@@ -63,6 +63,24 @@ export interface ProcessStatusMessage {
   message?: string;
 }
 
+export interface CalibrationStatusMessage {
+  type: 'calibration_status';
+  state: 'missing' | 'invalid' | 'incomplete' | 'ready' | 'restart_required';
+  message: string;
+  issues: string[];
+  blocked_assists: string[];
+  restart_required: boolean;
+  mock: boolean;
+  file: string;
+  help: string;
+}
+
+export interface CommandErrorMessage {
+  type: 'command_error';
+  command: string;
+  message: string;
+}
+
 export type ServerToClientMessage =
   | EngineStatusMessage
   | TelemetryMessage
@@ -70,6 +88,8 @@ export type ServerToClientMessage =
   | ScreenshotMessage
   | PongMessage
   | WaypointLoadResult
+  | CalibrationStatusMessage
+  | CommandErrorMessage
   | ProcessStatusMessage;
 
 export interface CommandMessage {

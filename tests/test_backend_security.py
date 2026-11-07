@@ -70,6 +70,7 @@ class BackendNetworkSecurityTests(unittest.IsolatedAsyncioTestCase):
         async with websockets.connect(self.url) as ws:
             await ws.recv()
             await ws.recv()
+            await ws.recv()  # Initial calibration status.
             await ws.send('x' * (64 * 1024 + 1))
             with self.assertRaises(ConnectionClosedError) as caught:
                 await ws.recv()
