@@ -265,8 +265,15 @@ class EDAPEngineServer:
         elif cmd == "load_waypoint_file":
             filepath = str(resolve_waypoint_file(data.get("filepath")))
             if self.ed_ap and hasattr(self.ed_ap, "waypoint") and filepath:
-                self.ed_ap.waypoint.load_waypoint_file(filepath)
-            await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": f"Loaded waypoint file: {filepath}"})
+                if not self.ed_ap.waypoint.load_waypoint_file(filepath):
+                    raise ValueError("The backend could not load this waypoint file.")
+                message = "Waypoint file loaded."
+            else:
+                message = "Waypoint file validated (mock mode)."
+            if isinstance(data.get("request_id"), str):
+                await ws.send(json.dumps({"type": "waypoint_load_result", "request_id": data["request_id"],
+                                          "success": True, "message": message}))
+            await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": f"{message} {filepath}"})
 
         elif cmd == "toggle_debug_stream":
             self.debug_stream_active = bool(data.get("enabled", not self.debug_stream_active))
@@ -288,6 +295,7 @@ class EDAPEngineServer:
             }))
 
             async for message in websocket:
+                data = None
                 try:
                     data = json.loads(message)
                     await self.handle_command(websocket, data)
@@ -295,6 +303,10 @@ class EDAPEngineServer:
                     logger.error("Received non-JSON message from client.")
                 except Exception as e:
                     logger.error(f"Error handling message: {e}")
+                    if (isinstance(data, dict) and data.get("command") == "load_waypoint_file"
+                            and isinstance(data.get("request_id"), str)):
+                        await websocket.send(json.dumps({"type": "waypoint_load_result", "request_id": data["request_id"],
+                                                         "success": False, "message": str(e)}))
         except ConnectionClosed:
             pass
         finally:

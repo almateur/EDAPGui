@@ -28,3 +28,6 @@ runs/
 # Dashboard node_modules
 node_modules/
 dashboard/node_modules/
+
+# Browser-selected waypoint copies and their saved progress
+/waypoints/imported-*.json

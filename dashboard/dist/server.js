@@ -43,6 +43,7 @@ const fs_1 = __importDefault(require("fs"));
 const child_process_1 = require("child_process");
 const ws_1 = __importStar(require("ws"));
 const security_1 = require("../security");
+const waypointFiles_1 = require("./waypointFiles");
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
 const ROOT_DIR = path_1.default.resolve(__dirname, '../../');
@@ -241,6 +242,32 @@ const publicPath = path_1.default.join(__dirname, '../dist-client');
 const publicPathDev = path_1.default.join(__dirname, '../public');
 app.use(express_1.default.static(publicPath));
 app.use(express_1.default.static(publicPathDev));
+app.post('/api/waypoints/import', (_req, res, next) => {
+    if (!isEngineConnected()) {
+        res.status(503).json({ error: 'Connect the Python backend before loading a waypoint file.' });
+        return;
+    }
+    next();
+}, express_1.default.raw({ type: 'application/json', limit: waypointFiles_1.MAX_WAYPOINT_BYTES, inflate: false }), (req, res) => {
+    if (!Buffer.isBuffer(req.body)) {
+        res.status(415).json({ error: 'Waypoint files must be sent as application/json.' });
+        return;
+    }
+    try {
+        res.status(201).json({ filepath: (0, waypointFiles_1.importWaypointFile)(req.body, ROOT_DIR) });
+    }
+    catch (error) {
+        if (error instanceof waypointFiles_1.WaypointFileError)
+            res.status(400).json({ error: error.message });
+        else {
+            console.error('[Dashboard TS Server] Waypoint import failed:', error);
+            res.status(500).json({ error: 'Unable to save the imported waypoint file.' });
+        }
+    }
+}, (error, _req, res, _next) => {
+    res.status(error.type === 'entity.too.large' ? 413 : 400)
+        .json({ error: error.type === 'entity.too.large' ? 'Waypoint files must be at most 1 MiB.' : 'Unable to read the waypoint file.' });
+});
 app.use(express_1.default.json());
 // API route health check
 app.get('/api/health', (_req, res) => {

@@ -147,6 +147,22 @@ for (const entry of ['dist/server.js', 'server.js']) {
     });
 
     if (entry === 'dist/server.js') {
+      await t.test('waypoint imports require same-origin JSON and enforce the file limit', async () => {
+        assert.equal(await requestStatus(`${origin}/api/waypoints/import`, {}, 'POST'), 403);
+        const headers = { Origin: origin, 'Content-Type': 'application/json' };
+        for (const body of ['not JSON', '{}', 'null', '{"GlobalShoppingList":[]}']) {
+          const response = await fetch(`${origin}/api/waypoints/import`, { method: 'POST', headers, body });
+          assert.equal(response.status, 400);
+          assert.equal(typeof (await response.json()).error, 'string');
+        }
+        assert.equal((await fetch(`${origin}/api/waypoints/import`, {
+          method: 'POST', headers, body: 'x'.repeat(1024 * 1024 + 1)
+        })).status, 413);
+        assert.equal((await fetch(`${origin}/api/waypoints/import`, {
+          method: 'POST', headers: { Origin: origin, 'Content-Type': 'text/plain' }, body: '{}'
+        })).status, 415);
+      });
+
       await t.test('new clients receive external backend status and cannot start or stop it', async () => {
         for (let visit = 0; visit < 2; visit++) {
           const ws = new WebSocket(origin.replace('http:', 'ws:'), { origin });

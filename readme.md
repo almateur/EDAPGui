@@ -229,6 +229,10 @@ Native WebSocket clients connecting to the dashboard must set `Origin: http://12
 
 The network waypoint loader accepts only existing `.json` files under the repository's `waypoints/` directory, up to 1 MiB. Parent-directory traversal and symlinks pointing outside that directory are rejected. This restriction applies to the WebSocket backend; the desktop file picker is unchanged.
 
+In the web dashboard, **Load File** opens the browser's file picker. Select a waypoint JSON file of at most 1 MiB. The dashboard validates it, imports a uniquely named `waypoints/imported-*.json` copy, and asks the connected Python backend to load that copy. The selected original is not overwritten. The UI reports success only after the backend confirms; invalid files, disconnected backends, and load failures appear below the picker. Imported copies and their progress files are ignored by Git.
+
+After updating this file-loading feature, rebuild the dashboard and restart both the Node dashboard server and the Python backend so the UI and backend use the same confirmation protocol.
+
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 
 ### Development checks

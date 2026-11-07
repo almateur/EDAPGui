@@ -1,4 +1,4 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
@@ -6,6 +6,7 @@ import { spawn, ChildProcess } from 'child_process';
 import WebSocket, { WebSocketServer } from 'ws';
 import { CommandMessage, ProcessStatusMessage, ServerToClientMessage } from './types';
 import { createLocalAccess } from '../security';
+import { importWaypointFile, MAX_WAYPOINT_BYTES, WaypointFileError } from './waypointFiles';
 
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
@@ -225,6 +226,32 @@ const publicPathDev = path.join(__dirname, '../public');
 
 app.use(express.static(publicPath));
 app.use(express.static(publicPathDev));
+
+app.post('/api/waypoints/import', (_req: Request, res: Response, next: NextFunction) => {
+  if (!isEngineConnected()) {
+    res.status(503).json({ error: 'Connect the Python backend before loading a waypoint file.' });
+    return;
+  }
+  next();
+}, express.raw({ type: 'application/json', limit: MAX_WAYPOINT_BYTES, inflate: false }),
+(req: Request, res: Response) => {
+  if (!Buffer.isBuffer(req.body)) {
+    res.status(415).json({ error: 'Waypoint files must be sent as application/json.' });
+    return;
+  }
+  try {
+    res.status(201).json({ filepath: importWaypointFile(req.body, ROOT_DIR) });
+  } catch (error) {
+    if (error instanceof WaypointFileError) res.status(400).json({ error: error.message });
+    else {
+      console.error('[Dashboard TS Server] Waypoint import failed:', error);
+      res.status(500).json({ error: 'Unable to save the imported waypoint file.' });
+    }
+  }
+}, (error: { type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+  res.status(error.type === 'entity.too.large' ? 413 : 400)
+    .json({ error: error.type === 'entity.too.large' ? 'Waypoint files must be at most 1 MiB.' : 'Unable to read the waypoint file.' });
+});
 app.use(express.json());
 
 // API route health check

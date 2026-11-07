@@ -12,7 +12,13 @@ const hasProcessStatus = ref(false);
 const backendPid = ref<number | null>(null);
 const debugStreamActive = ref(false);
 const debugImageSrc = ref('');
-const waypointFilepath = ref('waypoints/route.json');
+const waypointFilename = ref('');
+const waypointFileInput = ref<HTMLInputElement | null>(null);
+const isLoadingWaypoint = ref(false);
+const waypointMessage = ref('');
+const waypointError = ref(false);
+let pendingWaypointRequest: string | null = null;
+let waypointLoadTimer: ReturnType<typeof setTimeout> | null = null;
 const logConsole = ref<HTMLElement | null>(null);
 
 const telemetry = reactive<TelemetryData>({
@@ -74,6 +80,7 @@ function initWebSocket(): void {
   };
 
   ws.onclose = () => {
+    if (pendingWaypointRequest) finishWaypointLoad('Connection lost before the waypoint file was loaded.', true);
     isConnected.value = false;
     hasProcessStatus.value = false;
     isBackendRunning.value = false;
@@ -92,6 +99,7 @@ function handleServerMessage(msg: ServerToClientMessage): void {
   if (msg.type === 'engine_status') {
     isConnected.value = msg.connected;
     statusMessage.value = msg.message;
+    if (!msg.connected && pendingWaypointRequest) finishWaypointLoad('The Python backend disconnected before loading the file.', true);
   } else if (msg.type === 'process_status') {
     hasProcessStatus.value = true;
     isBuildingPython.value = msg.building;
@@ -109,6 +117,8 @@ function handleServerMessage(msg: ServerToClientMessage): void {
     if (debugStreamActive.value) {
       debugImageSrc.value = msg.image;
     }
+  } else if (msg.type === 'waypoint_load_result' && msg.request_id === pendingWaypointRequest) {
+    finishWaypointLoad(`${waypointFilename.value}: ${msg.message}`, !msg.success);
   }
 }
 
@@ -126,12 +136,14 @@ function appendLog(timestamp: string, message: string, isSystem = false): void {
   });
 }
 
-function sendCommand(command: string, extraData: Record<string, any> = {}): void {
+function sendCommand(command: string, extraData: Record<string, any> = {}): boolean {
   if (ws && ws.readyState === WebSocket.OPEN) {
     const payload: CommandMessage = { command, ...extraData };
     ws.send(JSON.stringify(payload));
+    return true;
   } else {
     appendLog(new Date().toLocaleTimeString(), 'Error: Cannot send command, WebSocket disconnected.');
+    return false;
   }
 }
 
@@ -161,8 +173,50 @@ function stopAllAssists(): void {
 }
 
 function loadWaypointFile(): void {
-  if (waypointFilepath.value.trim()) {
-    sendCommand('load_waypoint_file', { filepath: waypointFilepath.value.trim() });
+  waypointFileInput.value?.click();
+}
+
+function finishWaypointLoad(message: string, error = false): void {
+  if (waypointLoadTimer) clearTimeout(waypointLoadTimer);
+  waypointLoadTimer = null;
+  pendingWaypointRequest = null;
+  isLoadingWaypoint.value = false;
+  waypointMessage.value = message;
+  waypointError.value = error;
+}
+
+async function onWaypointFileSelected(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = ''; // Selecting the same file again must also trigger change.
+  if (!file || isLoadingWaypoint.value) return;
+  waypointFilename.value = file.name;
+  waypointMessage.value = `Loading ${file.name}...`;
+  waypointError.value = false;
+  isLoadingWaypoint.value = true;
+  try {
+    if (!file.name.toLowerCase().endsWith('.json')) throw new Error('Choose a JSON waypoint file.');
+    if (file.size > 1024 * 1024) throw new Error('Waypoint files must be at most 1 MiB.');
+    try { JSON.parse(await file.text()); }
+    catch { throw new Error('The selected file is not valid JSON.'); }
+    if (!isConnected.value) throw new Error('Connect the Python backend before loading a waypoint file.');
+    const response = await fetch('/api/waypoints/import', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: file
+    });
+    if (!response.ok) {
+      let message = 'Unable to import the waypoint file.';
+      try { message = (await response.json()).error || message; } catch { /* Keep the useful fallback. */ }
+      throw new Error(message);
+    }
+    const { filepath } = await response.json() as { filepath: string };
+    if (!isConnected.value) throw new Error('The Python backend disconnected before loading the file.');
+    pendingWaypointRequest = crypto.randomUUID();
+    waypointLoadTimer = setTimeout(() => finishWaypointLoad('The backend did not confirm loading the file. Try again.', true), 15000);
+    if (!sendCommand('load_waypoint_file', { filepath, request_id: pendingWaypointRequest })) {
+      throw new Error('The dashboard connection is unavailable.');
+    }
+  } catch (error) {
+    finishWaypointLoad(error instanceof Error ? error.message : 'Unable to load the waypoint file.', true);
   }
 }
 
@@ -334,9 +388,11 @@ onMounted(() => {
         <div class="card waypoint-card">
           <h2><span class="icon">📁</span> Waypoint Route</h2>
           <div class="input-group">
-            <input type="text" v-model="waypointFilepath" placeholder="e.g. waypoints/route.json">
-            <button class="btn btn-accent" @click="loadWaypointFile">Load File</button>
+            <input type="text" :value="waypointFilename" readonly aria-label="Selected waypoint file" placeholder="Choose a waypoint JSON file">
+            <input ref="waypointFileInput" type="file" accept=".json,application/json" hidden @change="onWaypointFileSelected">
+            <button class="btn btn-accent" :disabled="isLoadingWaypoint" @click="loadWaypointFile">{{ isLoadingWaypoint ? 'Loading...' : 'Load File' }}</button>
           </div>
+          <p v-if="waypointMessage" :role="waypointError ? 'alert' : 'status'">{{ waypointMessage }}</p>
         </div>
       </section>
 
