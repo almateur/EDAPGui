@@ -16,7 +16,13 @@ function createLocalAccess(server) {
 
     const origin = request.headers.origin;
     if (origin !== undefined && origin !== `http://${authority}`) return false;
-    if (request.headers['sec-fetch-site'] === 'cross-site') return false;
+    // Following a link is a normal way to open the UI. Only its top-level
+    // document may be navigated to cross-site; API reads and controls stay closed.
+    const pageNavigation = !websocket && request.method === 'GET'
+      && request.headers['sec-fetch-mode'] === 'navigate'
+      && request.headers['sec-fetch-dest'] === 'document'
+      && ['/', '/index.html'].includes((request.url || '').split('?')[0]);
+    if (request.headers['sec-fetch-site'] === 'cross-site' && !pageNavigation) return false;
     // Browser WebSockets and state-changing HTTP requests must be same-origin.
     const needsOrigin = websocket || !['GET', 'HEAD', 'OPTIONS'].includes(request.method || 'GET');
     return !needsOrigin || origin === `http://${authority}`;
