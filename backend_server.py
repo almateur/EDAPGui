@@ -5,6 +5,7 @@ Provides WebSocket interface for Node.js Dashboard (or Web clients) to control
 ED Autopilot, receive real-time telemetry, logs, and live debug screenshots/frames.
 """
 
+import argparse
 import asyncio
 from contextlib import suppress
 import base64
@@ -17,14 +18,9 @@ from pathlib import Path
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-# Import EDAutopilot core
-try:
-    from ED_AP import EDAutopilot
-    import cv2
-except Exception as e:
-    print(f"[Engine Backend] Warning importing EDAutopilot/cv2 dependencies: {e}")
-    EDAutopilot = None
-    cv2 = None
+# Game/OCR dependencies are imported only for a live engine, never for --mock,
+# --help, or modules that import the server for protocol tests.
+cv2 = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("EDAP_Backend")
@@ -47,7 +43,8 @@ def resolve_waypoint_file(filepath):
     return candidate
 
 class EDAPEngineServer:
-    def __init__(self):
+    def __init__(self, mock: bool = False):
+        self.mock_mode = mock
         self.connected_clients = set()
         self.ed_ap = None
         self.loop = None
@@ -125,15 +122,23 @@ class EDAPEngineServer:
 
     def init_engine(self):
         """Initialize EDAutopilot core if available."""
-        if EDAutopilot is not None:
-            try:
-                self.ed_ap = EDAutopilot(cb=self.ap_callback, do_thread=True)
-                logger.info("EDAutopilot initialized successfully.")
-            except Exception as e:
-                logger.error(f"Failed to initialize EDAutopilot core: {e}")
-                self.ed_ap = None
-        else:
-            logger.warning("EDAutopilot class unavailable. Running backend in mock mode.")
+        global cv2
+        if self.mock_mode:
+            self.latest_telemetry["status"] = "Mock mode"
+            logger.info("Mock mode requested: skipping game, OCR, and detection model initialization.")
+            return
+        logger.info("Initializing live autopilot. Keep Elite Dangerous running and visible; OCR/model loading may take time.")
+        try:
+            from ED_AP import EDAutopilot
+            import cv2 as engine_cv2
+            cv2 = engine_cv2
+            self.ed_ap = EDAutopilot(cb=self.ap_callback, do_thread=True)
+            logger.info("EDAutopilot initialized successfully.")
+        except Exception as e:
+            self.ed_ap = None
+            self.mock_mode = True
+            self.latest_telemetry["status"] = "Mock mode"
+            logger.warning("Live autopilot unavailable; running in mock mode: %s", e)
 
     async def periodic_telemetry_and_screenshots(self):
         """Periodically broadcast telemetry and debug frame screenshots."""
@@ -263,7 +268,7 @@ class EDAPEngineServer:
                 self.ed_ap.set_single_waypoint_assist("", "", False)
             for k in self.latest_telemetry["assists"]:
                 self.latest_telemetry["assists"][k] = False
-            self.latest_telemetry["status"] = "Idle"
+            self.latest_telemetry["status"] = "Mock mode" if self.mock_mode else "Idle"
             await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": "Command: Stop All Assists"})
 
         elif cmd == "load_waypoint_file":
@@ -295,7 +300,7 @@ class EDAPEngineServer:
             await websocket.send(json.dumps({
                 "type": "log",
                 "timestamp": datetime.now().strftime("%H:%M:%S"),
-                "message": "Connected to ED Autopilot Python Backend Engine"
+                "message": "Connected to ED Autopilot Python Backend Engine" + (" (mock mode: simulated controls)" if self.mock_mode else "")
             }))
 
             async for message in websocket:
@@ -339,7 +344,10 @@ class EDAPEngineServer:
                 await telemetry_task
 
 if __name__ == "__main__":
-    server = EDAPEngineServer()
+    parser = argparse.ArgumentParser(description="ED Autopilot WebSocket backend")
+    parser.add_argument("--mock", action="store_true", help="Run the web UI backend without importing game, OCR, or model dependencies; controls are simulated.")
+    args = parser.parse_args()
+    server = EDAPEngineServer(mock=args.mock)
     try:
         asyncio.run(server.main())
     except KeyboardInterrupt:

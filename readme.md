@@ -200,6 +200,18 @@ npm run server
 
 The dashboard listens on port 3000. Select **Start Python Backend** in the dashboard to start the Python process, then wait for **Connected to EDAP Python Engine**. In mock mode, assist buttons update simulated state and logs; ship/system values remain unknown. **Stop Python Backend** stops the managed process.
 
+### Use the web UI without the game
+
+To test the dashboard, select waypoint files, and simulate assist controls without starting Elite Dangerous or loading OCR/detection models, start the backend explicitly in mock mode from the repository root:
+
+```powershell
+.\.venv311\Scripts\python.exe .\backend_server.py --mock
+```
+
+On Linux, use `venv/bin/python backend_server.py --mock`. Keep that terminal running, start the Node dashboard in another terminal, and wait for `server listening on 127.0.0.1:8765` before loading a file. The UI reports **Mock mode** and treats this backend as started separately. Waypoint validation works; flight control and live screenshots are simulated or unavailable. The `--mock` option requires the updated `backend_server.py`; older versions do not implement it.
+
+For live operation, omit `--mock`, start Elite Dangerous in the supported borderless configuration, keep its window visible, and restart the backend. The server waits for live engine initialization before accepting dashboard connections. `Creating model`/cached-model messages describe OCR initialization, and the optional `ccache` warning is not a startup failure. A missing or minimized game window prevents live screen capture; the excerpt must reach the WebSocket `server listening` message before the dashboard is ready.
+
 The **Build Python Env** button installs the full `requirements.txt`, including Windows-specific packages. For Linux mock development, use the minimal environment above instead of that button. `npm run dev` starts the Vite frontend on port 5173, but it has no configured API/WebSocket proxy; use the compiled Express server for the complete dashboard/backend workflow.
 
 Configuration is optional for the default local setup:
