@@ -108,6 +108,16 @@ class BackendNetworkSecurityTests(unittest.IsolatedAsyncioTestCase):
 
 
 class BackendInputSecurityTests(unittest.IsolatedAsyncioTestCase):
+    async def test_active_waypoint_assist_cannot_have_its_route_replaced(self):
+        server = backend_server.EDAPEngineServer()
+        server.ed_ap = Mock()
+        for telemetry_active, engine_active in [(True, False), (False, True)]:
+            server.latest_telemetry['assists']['waypoint'] = telemetry_active
+            server.ed_ap.waypoint_assist_enabled = engine_active
+            with self.assertRaisesRegex(ValueError, 'Stop Waypoint Assist'):
+                await server.handle_command(AsyncMock(), {'command': 'load_waypoint_file', 'filepath': 'waypoints/sample-route.json'})
+        server.ed_ap.waypoint.load_waypoint_file.assert_not_called()
+
     async def test_public_bind_is_rejected_before_engine_initialization(self):
         server = backend_server.EDAPEngineServer()
         with patch.object(backend_server, 'HOST', '0.0.0.0'), patch.object(server, 'init_engine') as init:

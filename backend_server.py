@@ -309,6 +309,9 @@ class EDAPEngineServer:
             await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": "Command: Stop All Assists"})
 
         elif cmd == "load_waypoint_file":
+            if (self.latest_telemetry["assists"]["waypoint"]
+                    or (self.ed_ap is not None and getattr(self.ed_ap, "waypoint_assist_enabled", False) is True)):
+                raise ValueError("Stop Waypoint Assist before applying a route.")
             filepath = str(resolve_waypoint_file(data.get("filepath")))
             if self.ed_ap and hasattr(self.ed_ap, "waypoint") and filepath:
                 if not self.ed_ap.waypoint.load_waypoint_file(filepath):

@@ -42,6 +42,17 @@ test('all shipped waypoint examples are valid imports', t => {
   }
 });
 
+test('import keeps explicitly reordered numeric waypoints in Python execution order', t => {
+  const root = checkout(t);
+  const { parseWaypointRoute, serializeWaypointRoute } = require('../dist/waypointRoute');
+  const route = parseWaypointRoute(fs.readFileSync(path.join(__dirname, '../../waypoints/sample-route.json'), 'utf8'));
+  route.stops.reverse();
+  const imported = importWaypointFile(Buffer.from(serializeWaypointRoute(route)), root);
+  const text = fs.readFileSync(path.join(root, imported), 'utf8');
+  assert.ok(text.indexOf('"2":') < text.indexOf('"1":'));
+  assert.deepEqual(parseWaypointRoute(text).stops.map(stop => stop.key), ['2', '1']);
+});
+
 test('invalid, non-waypoint and oversized JSON never creates a file', t => {
   const root = checkout(t);
   for (const contents of ['not JSON', 'null', '[]', '{}', '{"GlobalShoppingList":[]}',
