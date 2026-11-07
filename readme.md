@@ -212,6 +212,27 @@ On Linux, use `venv/bin/python backend_server.py --mock`. Keep that terminal run
 
 For live operation, omit `--mock`, start Elite Dangerous in the supported borderless configuration, keep its window visible, and restart the backend. The server waits for live engine initialization before accepting dashboard connections. `Creating model`/cached-model messages describe OCR initialization, and the optional `ccache` warning is not a startup failure. A missing or minimized game window prevents live screen capture; the excerpt must reach the WebSocket `server listening` message before the dashboard is ready.
 
+### Stopping the backend
+
+Press **Ctrl+C** in its terminal. The backend stops assists, releases held keys through the engine's cleanup, closes its listener, and shuts down voice/overlays. A second interrupt forces exit if cleanup is stuck; once Python handles the first interrupt, a five-second fallback bounds shutdown. A forced exit skips any remaining cleanup.
+
+If text is selected in a Windows terminal, press **Esc** first so Ctrl+C is sent to the program rather than copying the selection. Ctrl+Break is also handled where available. Native OCR code may delay Python signal delivery; for a stuck older process, open another PowerShell terminal and identify the backend process:
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'backend_server\.py' } |
+  Select-Object ProcessId, CommandLine
+```
+
+To stop only the matching backend, enter its `ProcessId` from that list:
+
+```powershell
+$backendProcessId = Read-Host 'Backend ProcessId'
+Stop-Process -Id ([int]$backendProcessId) -Force
+```
+
+### Configuration
+
 The **Build Python Env** button installs the full `requirements.txt`, including Windows-specific packages. For Linux mock development, use the minimal environment above instead of that button. `npm run dev` starts the Vite frontend on port 5173, but it has no configured API/WebSocket proxy; use the compiled Express server for the complete dashboard/backend workflow.
 
 Configuration is optional for the default local setup:

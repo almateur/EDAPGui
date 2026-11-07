@@ -46,8 +46,9 @@ assert server.latest_telemetry['status'] == 'Mock mode'
         server = backend_server.EDAPEngineServer()
         with patch.dict(sys.modules, {'ED_AP': core, 'cv2': cv}), patch.object(backend_server, 'cv2', None):
             server.init_engine()
-        core.EDAutopilot.assert_called_once_with(cb=server.ap_callback, do_thread=True)
+        core.EDAutopilot.assert_called_once_with(cb=server.ap_callback, do_thread=False)
         self.assertIs(server.ed_ap, core.EDAutopilot.return_value)
+        self.assertTrue(server.ed_ap.ap_thread.daemon)
         self.assertFalse(server.mock_mode)
 
     def test_failed_live_initialization_retains_automatic_mock_fallback(self):
