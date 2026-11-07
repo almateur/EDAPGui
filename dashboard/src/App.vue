@@ -555,7 +555,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
 .route-state.applied { color: var(--accent-green); }
 .route-state.edited { color: var(--accent-orange); }
 .route-validation { color: var(--accent-red); margin-top: 16px; font-size: .9rem; }
-.route-save-bar { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); }
+.route-save-bar { position: sticky; bottom: 0; z-index: 2; background: var(--bg-card); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-top: 20px; padding: 16px 0; border-top: 1px solid var(--border-color); }
 .route-save-bar p, .route-empty { color: var(--text-muted); font-size: .85rem; }
 .route-save-bar p { flex: 1 1 260px; }
 .route-save-actions { display: flex; gap: 10px; flex-wrap: wrap; }

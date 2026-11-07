@@ -16,7 +16,17 @@ For each destination, the autopilot plots a course to `SystemName` in the Galaxy
 
 ## Waypoint Editor
 
-The web dashboard includes a route editor. Its connected timeline shows travel order, systems, stations, trading stops, and saved skipped/completed flags. Select a stop to change its fields, use the up/down controls to reorder it, or add/remove destinations. **Reset completion** clears all completion flags for another run. **Repeat route** adds a final `REPEAT` entry; move it back to the end if validation flags its position.
+The web dashboard opens routes in **Quick edit**, a compact table with inline waypoint names, systems, stations, and skip/completion flags. Edit several rows directly. Press **Enter** to edit the next stop in the same column, or **Shift+Enter** to go back; the next cell's contents are selected for replacement. **Add stop** focuses the new destination immediately. Use **Details** for comments, bookmarks, and trading; **Previous stop** and **Next stop** move through those details without returning to the list.
+
+For bulk changes:
+
+1. Use the checkboxes to select stops. **Shift-click** selects a range; **Select all shown** selects the current search/filter results.
+2. Delete, skip, enable, mark completed/pending, or move the selection up/down in one action. The selection count explicitly includes stops outside the current filter; **Clear selection** deselects everything.
+3. **Undo removal** restores the last deletion in travel order while preserving edits made to surviving stops. If you reused a deleted waypoint name, the restored name gets a unique ` (restored)` suffix. **Undo edits** restores the entire last opened/applied version.
+
+Search by system, station, waypoint name, or comment, and filter by status. A row stays visible while you edit it even if its new value no longer matches the search. On small screens, scroll the table horizontally. The save/download controls stay available at the bottom while scrolling the editor.
+
+Switch to **Route view** for the connected timeline showing travel order, systems, stations, trading stops, and saved skipped/completed flags. It supports the same bulk selection controls. **Reset completion** clears all completion flags for another run. **Repeat route** adds a final `REPEAT` entry; move it back to the end if validation flags its position.
 
 Each stop has editable buy/sell commodity rows and bookmark settings. Commodity quantities must be nonnegative whole numbers; the `All` commodity with quantity `0` remains supported. Expand **Global shopping list** to edit the shared purchases and count updates. The engine ignores the global list's `Skip` field; the editor retains it for file compatibility. Unknown extra JSON fields are retained when saving.
 

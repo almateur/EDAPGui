@@ -32,6 +32,158 @@ async def stop(process):
             await process.wait()
 
 
+
+async def verify_bulk_editing(page, choose, export_route, folder, sent):
+    sample = json.loads((ROOT / 'waypoints/sample-route.json').read_text())
+    data = {'GlobalShoppingList': sample['GlobalShoppingList']}
+    for number in range(1, 13):
+        stop = json.loads(json.dumps(sample['1']))
+        stop['SystemName'] = f'Bulk {number:02}'
+        data[str(number)] = stop
+    data['2']['Extension'] = {'preserve': ['custom data']}
+    data['2']['BuyCommodities'] = {'Gold': 5}
+    source = folder / 'bulk-route.json'
+    original = json.dumps(data).encode()
+    source.write_bytes(original)
+    await choose(str(source))
+    await expect(page.locator('.route-state')).to_have_text('Applied to backend')
+    await page.get_by_role('button', name='Quick edit', exact=True).click()
+    rows = page.locator('.quick-table tr[data-stop-id]')
+    await expect(rows).to_have_count(12)
+    await expect(page.locator('.stop-editor')).to_have_count(0)
+    field = page.get_by_role('textbox', name='System for stop 1', exact=True)
+    await field.fill('First edited')
+    await field.press('Enter')
+    await expect(page.get_by_role('textbox', name='System for stop 2', exact=True)).to_be_focused()
+    await page.keyboard.type('Second edited')
+    await page.keyboard.press('Shift+Enter')
+    await expect(field).to_be_focused()
+    await page.get_by_role('textbox', name='Station for stop 1', exact=True).fill('Port Alpha')
+    await page.get_by_role('textbox', name='Station for stop 1', exact=True).press('Enter')
+    await expect(page.get_by_role('textbox', name='Station for stop 2', exact=True)).to_be_focused()
+    await page.keyboard.type('Port Beta')
+
+    def select(number):
+        return page.get_by_role('checkbox', name=f'Select stop {number}:', exact=False)
+
+    initial_position = await select(2).bounding_box()
+    await select(2).click()
+    assert abs((await select(2).bounding_box())['y'] - initial_position['y']) < 1, 'Selection must not move rows'
+    await select(5).click(modifiers=['Shift'])
+    await expect(page.locator('.quick-table .row-select:checked')).to_have_count(4)
+    select_all = page.get_by_role('checkbox', name='Select all shown', exact=True)
+    assert await select_all.evaluate('(el) => el.indeterminate')
+    await page.get_by_role('button', name='Delete selected (4)', exact=True).click()
+    await expect(rows).to_have_count(8)
+    await expect(page.locator('.removal-notice')).to_contain_text('Removed 4 stops')
+    await page.get_by_role('textbox', name='System for stop 2', exact=True).fill('Kept while undoing')
+    await page.get_by_role('button', name='Undo removal', exact=True).click()
+    await expect(rows).to_have_count(12)
+    await expect(page.get_by_role('textbox', name='System for stop 2', exact=True)).to_have_value('Second edited')
+    await expect(page.get_by_role('textbox', name='System for stop 6', exact=True)).to_have_value('Kept while undoing')
+    await page.get_by_role('button', name='Skip selected', exact=True).click()
+    for number in range(2, 6):
+        await expect(page.get_by_role('checkbox', name=f'Skip stop {number}', exact=True)).to_be_checked()
+    await page.get_by_role('button', name='Enable selected', exact=True).click()
+    await page.get_by_role('button', name='Mark completed', exact=True).click()
+    for number in range(2, 6):
+        await expect(page.get_by_role('checkbox', name=f'Completed stop {number}', exact=True)).to_be_checked()
+    status_filter = page.get_by_role('combobox', name='Filter waypoint status', exact=True)
+    await status_filter.select_option('completed')
+    await expect(rows).to_have_count(4)
+    await page.get_by_role('button', name='Mark pending', exact=True).click()
+    await expect(rows).to_have_count(0)
+    await expect(page.locator('.selection-count')).to_contain_text('4 outside filter')
+    await status_filter.select_option('all')
+    await page.get_by_role('button', name='Clear selection', exact=True).click()
+    search = page.get_by_role('searchbox', name='Search waypoints', exact=True)
+    await search.fill('Bulk 0')
+    await expect(rows).to_have_count(6)
+    await select_all.check()
+    await expect(page.locator('.selection-count')).to_contain_text('6 selected')
+    await search.fill('no-match')
+    await expect(rows).to_have_count(0)
+    await expect(page.locator('.selection-count')).to_contain_text('6 outside filter')
+    await page.get_by_role('button', name='Delete selected (6)', exact=True).click()
+    await expect(page.locator('.route-stats')).to_contain_text('6 stops')
+    await page.get_by_role('button', name='Undo removal', exact=True).click()
+    await page.get_by_role('button', name='Clear filters', exact=True).click()
+    await expect(rows).to_have_count(12)
+    await page.get_by_role('button', name='Clear selection', exact=True).click()
+    await select(3).click()
+    await select(5).click()
+    await page.get_by_role('button', name='Move selected up', exact=True).click()
+    await expect(page.get_by_role('textbox', name='Waypoint name for stop 2', exact=True)).to_have_value('3')
+    await expect(page.get_by_role('textbox', name='Waypoint name for stop 4', exact=True)).to_have_value('5')
+    await page.get_by_role('button', name='Move selected down', exact=True).click()
+    await page.get_by_role('button', name='Clear selection', exact=True).click()
+    await search.fill('First edited')
+    await expect(rows).to_have_count(1)
+    await field.fill('Renamed outside filter')
+    await expect(field).to_be_focused()
+    await expect(rows).to_have_count(1)
+    await page.get_by_role('textbox', name='Station for stop 1', exact=True).fill('Port edited inline')
+    await search.click()
+    await expect(rows).to_have_count(0)
+    await page.get_by_role('button', name='Clear filters', exact=True).click()
+    await page.get_by_role('button', name='Details for stop 1', exact=True).click()
+    await page.get_by_role('button', name='Next stop', exact=True).click()
+    await expect(page.locator('.stop-editor').get_by_role('textbox', name='System', exact=True)).to_have_value('Second edited')
+    await page.get_by_role('button', name='Previous stop', exact=True).click()
+    await expect(page.locator('.stop-editor').get_by_role('textbox', name='System', exact=True)).to_have_value('Renamed outside filter')
+    await page.get_by_role('button', name='Close details', exact=True).click()
+    await page.get_by_role('button', name='+ Add stop', exact=True).click()
+    await expect(page.get_by_role('textbox', name='System for stop 13', exact=True)).to_be_focused()
+    await page.get_by_role('textbox', name='System for stop 13', exact=True).fill('New inline stop')
+    await page.get_by_role('button', name='Delete stop 13', exact=True).click()
+    await expect(rows).to_have_count(12)
+    await select_all.check()
+    screenshots = os.environ.get('EDAP_TEST_SCREENSHOTS')
+    if screenshots:
+        Path(screenshots).mkdir(parents=True, exist_ok=True)
+        await page.locator('.waypoint-card').screenshot(path=str(Path(screenshots) / 'waypoint-bulk-editor.png'))
+    await page.set_viewport_size({'width': 390, 'height': 844})
+    assert await page.locator('.waypoint-card').evaluate('(el) => el.scrollWidth <= el.clientWidth')
+    assert await page.locator('.quick-table-wrap').evaluate('(el) => el.scrollWidth > el.clientWidth')
+    if screenshots:
+        await page.locator('.waypoint-card').screenshot(path=str(Path(screenshots) / 'waypoint-bulk-editor-mobile.png'))
+    await page.set_viewport_size({'width': 1440, 'height': 1100})
+    await page.get_by_role('button', name='Delete selected (12)', exact=True).click()
+    await expect(rows).to_have_count(0)
+    await expect(page.locator('.quick-table')).to_contain_text('Your route is empty')
+    await page.get_by_role('button', name='Undo removal', exact=True).click()
+    await expect(rows).to_have_count(12)
+    await page.get_by_role('button', name='Clear selection', exact=True).click()
+    exported = await export_route()
+    assert [key for key in exported if key != 'GlobalShoppingList'] == [str(number) for number in range(1, 13)]
+    assert exported['2']['Extension'] == {'preserve': ['custom data']}
+    assert exported['2']['BuyCommodities'] == {'Gold': 5}
+    assert exported['1']['SystemName'] == 'Renamed outside filter'
+    assert exported['1']['StationName'] == 'Port edited inline'
+    assert exported['2']['StationName'] == 'Port Beta'
+    assert exported['6']['SystemName'] == 'Kept while undoing'
+    await select(2).click()
+    await select(4).click(modifiers=['Shift'])
+    await page.get_by_role('button', name='Delete selected (3)', exact=True).click()
+    exported = await export_route()
+    assert [key for key in exported if key != 'GlobalShoppingList'] == ['1'] + [str(number) for number in range(5, 13)]
+    await page.get_by_role('button', name='Apply changes', exact=True).click()
+    await expect(page.locator('.route-state')).to_have_text('Applied to backend')
+    saved = json.loads((ROOT / sent[-1]['filepath']).read_text())
+    assert list(saved) == list(exported) and saved == exported
+    assert source.read_bytes() == original
+    await page.get_by_role('button', name='Route view', exact=True).click()
+    await select(2).click()
+    await select(3).click(modifiers=['Shift'])
+    await expect(page.locator('.timeline-select:checked')).to_have_count(2)
+    await page.get_by_role('button', name='Delete selected (2)', exact=True).click()
+    await expect(page.locator('.route-stop')).to_have_count(7)
+    await page.get_by_role('button', name='Undo removal', exact=True).click()
+    await expect(page.locator('.route-stop')).to_have_count(9)
+    await page.get_by_role('button', name='Clear selection', exact=True).click()
+    print('PASS: inline editing, Enter navigation, shift range, filtered selection, bulk flags/movement/deletion, undo preserving later edits, delete-all recovery, confirmed batch apply and mobile table scrolling.')
+
+
 async def main():
     port, engine_port = free_port(), free_port()
     origin = f'http://127.0.0.1:{port}'
@@ -96,6 +248,7 @@ async def main():
 
                     await choose(str(source))
                     await expect(page.locator('.route-state')).to_have_text('Applied to backend')
+                    await page.get_by_role('button', name='Route view', exact=True).click()
                     await expect(timeline).to_have_count(2)
                     await expect(timeline.first).to_contain_text('Eravate')
                     await page.get_by_role('textbox', name='System', exact=True).fill('Sol')
@@ -180,7 +333,7 @@ async def main():
                     await expect(apply).to_be_disabled()
                     count = len(sent)
                     await choose(str(source))
-                    await expect(page.locator('.waypoint-card [role=status]')).to_contain_text('Stop Waypoint Assist')
+                    await expect(page.locator('.waypoint-card > p[role=status]')).to_contain_text('Stop Waypoint Assist')
                     assert len(sent) == count
                     await page.get_by_role('button', name='Stop Waypoint Assist').click()
                     await apply.click()
@@ -189,11 +342,12 @@ async def main():
                     await choose({'name': 'broken.json', 'mimeType': 'application/json', 'buffer': b'{'})
                     await expect(page.locator('.waypoint-card [role=alert]')).to_contain_text('valid JSON')
                     await expect(timeline).to_have_count(2)
+                    await verify_bulk_editing(page, choose, export, folder, sent)
                     # Offline preview, edit, download and responsive layout.
                     await stop(backend)
                     await expect(page.locator('#connection-status')).to_contain_text('Disconnected from Python Engine', timeout=10000)
                     await choose(str(source))
-                    await expect(page.locator('.waypoint-card [role=status]')).to_contain_text('opened for editing')
+                    await expect(page.locator('.waypoint-card > p[role=status]')).to_contain_text('opened for editing')
                     await page.get_by_role('textbox', name='System', exact=True).fill('Lave')
                     assert (await export())['1']['SystemName'] == 'Lave'
                     await expect(apply).to_be_disabled()
