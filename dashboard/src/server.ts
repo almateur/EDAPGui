@@ -31,7 +31,7 @@ function broadcastProcessStatus(extraMessage?: string): void {
   broadcastToClients({
     type: 'process_status',
     building: isBuildingPython,
-    running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+    running: pythonBackendProcess !== null,
     pid: pythonBackendProcess?.pid,
     message: extraMessage
   });
@@ -113,7 +113,7 @@ function buildPythonEnvironment(res?: Response): void {
 }
 
 function startPythonBackend(res?: Response): void {
-  if (pythonBackendProcess && !pythonBackendProcess.killed) {
+  if (pythonBackendProcess) {
     const msg = 'Python backend server is already running.';
     if (res) res.status(400).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
@@ -131,6 +131,7 @@ function startPythonBackend(res?: Response): void {
       env: { ...process.env, PYTHONUNBUFFERED: '1' }
     });
 
+    const child = pythonBackendProcess;
     broadcastProcessStatus('Python backend server starting...');
 
     pythonBackendProcess.stdout?.on('data', (data) => {
@@ -151,13 +152,13 @@ function startPythonBackend(res?: Response): void {
 
     pythonBackendProcess.on('error', (err) => {
       logAndBroadcast(`[Python Backend] Failed to launch process: ${err.message}`);
-      pythonBackendProcess = null;
+      if (pythonBackendProcess === child) pythonBackendProcess = null;
       broadcastProcessStatus(`Failed to launch backend: ${err.message}`);
     });
 
     pythonBackendProcess.on('close', (code) => {
       logAndBroadcast(`[Python Backend] Process exited with code ${code}`);
-      pythonBackendProcess = null;
+      if (pythonBackendProcess === child) pythonBackendProcess = null;
       broadcastProcessStatus(`Backend process exited with code ${code}`);
     });
 
@@ -173,7 +174,7 @@ function startPythonBackend(res?: Response): void {
 }
 
 function stopPythonBackend(res?: Response): void {
-  if (!pythonBackendProcess || pythonBackendProcess.killed) {
+  if (!pythonBackendProcess) {
     const msg = 'Python backend process is not currently running.';
     if (res) res.status(400).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
@@ -181,19 +182,20 @@ function stopPythonBackend(res?: Response): void {
   }
 
   logAndBroadcast('=== Stopping Python Backend Server ===');
-  pythonBackendProcess.kill('SIGTERM');
+  const child = pythonBackendProcess;
+  child.kill('SIGTERM');
 
-  setTimeout(() => {
-    if (pythonBackendProcess && !pythonBackendProcess.killed) {
+  // killed only means a signal was sent; wait for close to establish exit.
+  const killTimer = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) {
       logAndBroadcast('Force killing Python Backend Server...');
-      pythonBackendProcess.kill('SIGKILL');
-    }
-    pythonBackendProcess = null;
-    broadcastProcessStatus('Python backend stopped');
-    if (res) {
-      res.json({ status: 'stopped', message: 'Python backend stopped.' });
+      child.kill('SIGKILL');
     }
   }, 1000);
+  child.once('close', () => {
+    clearTimeout(killTimer);
+    if (res) res.json({ status: 'stopped', message: 'Python backend stopped.' });
+  });
 }
 
 // Serve static compiled Vue frontend assets
@@ -213,7 +215,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 app.get('/api/python/status', (_req: Request, res: Response) => {
   res.json({
     building: isBuildingPython,
-    running: pythonBackendProcess !== null && !pythonBackendProcess.killed,
+    running: pythonBackendProcess !== null,
     pid: pythonBackendProcess?.pid || null
   });
 });

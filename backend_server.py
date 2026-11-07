@@ -6,15 +6,15 @@ ED Autopilot, receive real-time telemetry, logs, and live debug screenshots/fram
 """
 
 import asyncio
+from contextlib import suppress
 import base64
 import json
 import os
-import sys
-import threading
 import logging
 from datetime import datetime
 
 import websockets
+from websockets.exceptions import ConnectionClosed
 
 # Import EDAutopilot core
 try:
@@ -98,10 +98,10 @@ class EDAPEngineServer:
             return
         msg_str = json.dumps(message_dict)
         disconnected = set()
-        for ws in self.connected_clients:
+        for ws in tuple(self.connected_clients):
             try:
                 await ws.send(msg_str)
-            except websockets.exceptions.ConnectionClosed:
+            except ConnectionClosed:
                 disconnected.add(ws)
             except Exception as e:
                 logger.error(f"Error broadcasting to client: {e}")
@@ -159,6 +159,8 @@ class EDAPEngineServer:
 
     async def handle_command(self, ws, data):
         """Process command message from client."""
+        if not isinstance(data, dict):
+            raise ValueError("Command must be a JSON object")
         cmd = data.get("command")
         logger.info(f"Received command: {cmd}")
 
@@ -259,15 +261,15 @@ class EDAPEngineServer:
         self.connected_clients.add(websocket)
         logger.info(f"Client connected. Total clients: {len(self.connected_clients)}")
 
-        # Send initial state and log message
-        await websocket.send(json.dumps({"type": "telemetry", "data": self.latest_telemetry}))
-        await websocket.send(json.dumps({
-            "type": "log",
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "message": "Connected to ED Autopilot Python Backend Engine"
-        }))
-
         try:
+            # Initial sends also need cleanup if the client disconnects.
+            await websocket.send(json.dumps({"type": "telemetry", "data": self.latest_telemetry}))
+            await websocket.send(json.dumps({
+                "type": "log",
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "message": "Connected to ED Autopilot Python Backend Engine"
+            }))
+
             async for message in websocket:
                 try:
                     data = json.loads(message)
@@ -276,21 +278,25 @@ class EDAPEngineServer:
                     logger.error("Received non-JSON message from client.")
                 except Exception as e:
                     logger.error(f"Error handling message: {e}")
-        except websockets.exceptions.ConnectionClosed:
+        except ConnectionClosed:
             pass
         finally:
-            self.connected_clients.remove(websocket)
+            self.connected_clients.discard(websocket)
             logger.info(f"Client disconnected. Total clients: {len(self.connected_clients)}")
 
     async def main(self):
         self.loop = asyncio.get_running_loop()
         self.init_engine()
 
-        asyncio.create_task(self.periodic_telemetry_and_screenshots())
-
-        logger.info(f"Starting Python Engine WebSocket Server on {HOST}:{PORT}...")
-        async with websockets.serve(self.client_handler, HOST, PORT):
-            await asyncio.Future()  # run forever
+        telemetry_task = asyncio.create_task(self.periodic_telemetry_and_screenshots())
+        try:
+            logger.info(f"Starting Python Engine WebSocket Server on {HOST}:{PORT}...")
+            async with websockets.serve(self.client_handler, HOST, PORT):
+                await asyncio.Future()  # run forever
+        finally:
+            telemetry_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await telemetry_task
 
 if __name__ == "__main__":
     server = EDAPEngineServer()
