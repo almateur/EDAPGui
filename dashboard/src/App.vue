@@ -7,6 +7,8 @@ const isConnected = ref(false);
 const statusMessage = ref('Connecting to Engine...');
 const isBuildingPython = ref(false);
 const isBackendRunning = ref(false);
+const isBackendManaged = ref(false);
+const hasProcessStatus = ref(false);
 const backendPid = ref<number | null>(null);
 const debugStreamActive = ref(false);
 const debugImageSrc = ref('');
@@ -45,6 +47,12 @@ let ws: WebSocket | null = null;
 let logIdCounter = 2;
 
 const roundedFuel = computed(() => Math.round(telemetry.fuel));
+const backendStatusLabel = computed(() => {
+  if (!hasProcessStatus.value) return 'Checking...';
+  if (!isBackendRunning.value) return 'Stopped';
+  if (!isBackendManaged.value) return 'Running (started separately)';
+  return backendPid.value ? `Running (PID: ${backendPid.value})` : 'Running';
+});
 
 function initWebSocket(): void {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -67,6 +75,10 @@ function initWebSocket(): void {
 
   ws.onclose = () => {
     isConnected.value = false;
+    hasProcessStatus.value = false;
+    isBackendRunning.value = false;
+    isBackendManaged.value = false;
+    backendPid.value = null;
     statusMessage.value = 'Disconnected from Server';
     setTimeout(initWebSocket, 3000);
   };
@@ -81,8 +93,10 @@ function handleServerMessage(msg: ServerToClientMessage): void {
     isConnected.value = msg.connected;
     statusMessage.value = msg.message;
   } else if (msg.type === 'process_status') {
+    hasProcessStatus.value = true;
     isBuildingPython.value = msg.building;
     isBackendRunning.value = msg.running;
+    isBackendManaged.value = msg.managed;
     backendPid.value = msg.pid || null;
     if (msg.message) {
       appendLog(new Date().toLocaleTimeString(), `[Engine Manager] ${msg.message}`, true);
@@ -192,8 +206,8 @@ onMounted(() => {
           <h2><span class="icon">⚙️</span> Python Engine Manager</h2>
           <div class="engine-status-row">
             <span class="label">Backend Process:</span>
-            <span :class="['badge-status', isBackendRunning ? 'status-running' : 'status-stopped']">
-              {{ isBackendRunning ? `Running (PID: ${backendPid})` : 'Stopped' }}
+            <span :class="['badge-status', hasProcessStatus ? (isBackendRunning ? 'status-running' : 'status-stopped') : 'status-building']">
+              {{ backendStatusLabel }}
             </span>
             <span v-if="isBuildingPython" class="badge-status status-building">
               🔨 Building Environment...
@@ -210,7 +224,7 @@ onMounted(() => {
             </button>
 
             <button
-              v-if="!isBackendRunning"
+              v-if="hasProcessStatus && !isBackendRunning"
               class="btn btn-accent"
               :disabled="isBuildingPython"
               @click="startPythonBackend"
@@ -220,7 +234,7 @@ onMounted(() => {
             </button>
 
             <button
-              v-else
+              v-if="hasProcessStatus && isBackendManaged"
               class="btn btn-danger"
               @click="stopPythonBackend"
             >
@@ -228,6 +242,9 @@ onMounted(() => {
               <span class="btn-text">Stop Python Backend</span>
             </button>
           </div>
+          <p v-if="hasProcessStatus && isBackendRunning && !isBackendManaged">
+            This backend was started outside the dashboard. Stop it in the terminal or app where you launched it.
+          </p>
         </div>
 
         <!-- Telemetry Card -->

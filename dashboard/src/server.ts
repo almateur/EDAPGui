@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket, { WebSocketServer } from 'ws';
-import { CommandMessage, ServerToClientMessage } from './types';
+import { CommandMessage, ProcessStatusMessage, ServerToClientMessage } from './types';
 import { createLocalAccess } from '../security';
 
 const APP_PORT = process.env.PORT || 3000;
@@ -30,14 +30,26 @@ function getPythonExecutable(): string {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
-function broadcastProcessStatus(extraMessage?: string): void {
-  broadcastToClients({
+function isEngineConnected(): boolean {
+  return engineWs !== null && engineWs.readyState === WebSocket.OPEN;
+}
+
+function getProcessStatus(extraMessage?: string): ProcessStatusMessage {
+  const managed = pythonBackendProcess !== null;
+  const connected = isEngineConnected();
+  return {
     type: 'process_status',
     building: isBuildingPython,
-    running: pythonBackendProcess !== null,
+    running: managed || connected,
+    managed,
+    connected,
     pid: pythonBackendProcess?.pid,
     message: extraMessage
-  });
+  };
+}
+
+function broadcastProcessStatus(extraMessage?: string): void {
+  broadcastToClients(getProcessStatus(extraMessage));
 }
 
 function logAndBroadcast(message: string): void {
@@ -116,10 +128,13 @@ function buildPythonEnvironment(res?: Response): void {
 }
 
 function startPythonBackend(res?: Response): void {
-  if (pythonBackendProcess) {
-    const msg = 'Python backend server is already running.';
-    if (res) res.status(400).json({ error: msg });
+  if (pythonBackendProcess || isEngineConnected()) {
+    const msg = pythonBackendProcess
+      ? 'Python backend server is already running.'
+      : 'A backend is already connected and was started outside the dashboard.';
+    if (res) res.status(409).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
+    broadcastProcessStatus();
     return;
   }
 
@@ -178,8 +193,11 @@ function startPythonBackend(res?: Response): void {
 
 function stopPythonBackend(res?: Response): void {
   if (!pythonBackendProcess) {
-    const msg = 'Python backend process is not currently running.';
-    if (res) res.status(400).json({ error: msg });
+    const external = isEngineConnected();
+    const msg = external
+      ? 'This backend was started outside the dashboard. Stop it where you launched it.'
+      : 'Python backend process is not currently running.';
+    if (res) res.status(external ? 409 : 400).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
     return;
   }
@@ -216,10 +234,13 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Process management REST endpoints
 app.get('/api/python/status', (_req: Request, res: Response) => {
+  const status = getProcessStatus();
   res.json({
-    building: isBuildingPython,
-    running: pythonBackendProcess !== null,
-    pid: pythonBackendProcess?.pid || null
+    building: status.building,
+    running: status.running,
+    managed: status.managed,
+    connected: status.connected,
+    pid: status.pid ?? null
   });
 });
 
@@ -261,6 +282,7 @@ function connectToPythonEngine(): void {
       connected: true,
       message: 'Connected to EDAP Python Engine'
     });
+    broadcastProcessStatus();
   });
 
   engineWs.on('message', (data: WebSocket.RawData) => {
@@ -279,6 +301,7 @@ function connectToPythonEngine(): void {
       connected: false,
       message: 'Disconnected from Python Engine'
     });
+    broadcastProcessStatus();
     scheduleReconnect();
   });
 
@@ -308,13 +331,14 @@ function broadcastToClients(msgObj: ServerToClientMessage): void {
 wss.on('connection', (ws: WebSocket) => {
   console.log('[Dashboard TS Server] Browser client connected.');
 
-  const isEngineConnected = engineWs !== null && engineWs.readyState === WebSocket.OPEN;
+  const connected = isEngineConnected();
   const statusMsg: ServerToClientMessage = {
     type: 'engine_status',
-    connected: isEngineConnected,
-    message: isEngineConnected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
+    connected,
+    message: connected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
   };
   ws.send(JSON.stringify(statusMsg));
+  ws.send(JSON.stringify(getProcessStatus()));
 
   ws.on('message', (message: WebSocket.RawData) => {
     try {

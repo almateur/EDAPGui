@@ -213,6 +213,8 @@ Configuration is optional for the default local setup:
 
 Set these in the dashboard process environment so its Python child inherits them. If changing `EDAP_PORT`, update `ENGINE_WS_URL` to match. The backend can also run separately with `python backend_server.py`; in that case, its process is managed separately from the dashboard's start/stop controls.
 
+A connected backend started in another terminal appears as **Running (started separately)**. Its Start/Stop buttons are hidden, and the dashboard will not launch a duplicate or stop that external process. A backend started by the dashboard shows its PID and can be stopped there. Status is refreshed on page reload and when the backend connects or disconnects. The `/api/python/status` response distinguishes `running`, `connected`, and `managed`; a PID is available only for the process the dashboard started.
+
 ### Local control security
 
 The dashboard binds to `127.0.0.1`; the Python backend also defaults to loopback and rejects public bind addresses. These services trust local processes and do not provide remote-user authentication. Do not expose them through a reverse proxy, tunnel, or port forward. Remote access requires a separate authenticated design.

@@ -62,14 +62,24 @@ function getPythonExecutable() {
         return venvUnix;
     return process.platform === 'win32' ? 'python' : 'python3';
 }
-function broadcastProcessStatus(extraMessage) {
-    broadcastToClients({
+function isEngineConnected() {
+    return engineWs !== null && engineWs.readyState === ws_1.default.OPEN;
+}
+function getProcessStatus(extraMessage) {
+    const managed = pythonBackendProcess !== null;
+    const connected = isEngineConnected();
+    return {
         type: 'process_status',
         building: isBuildingPython,
-        running: pythonBackendProcess !== null,
+        running: managed || connected,
+        managed,
+        connected,
         pid: pythonBackendProcess?.pid,
         message: extraMessage
-    });
+    };
+}
+function broadcastProcessStatus(extraMessage) {
+    broadcastToClients(getProcessStatus(extraMessage));
 }
 function logAndBroadcast(message) {
     const time = new Date().toLocaleTimeString();
@@ -140,11 +150,14 @@ function buildPythonEnvironment(res) {
     }
 }
 function startPythonBackend(res) {
-    if (pythonBackendProcess) {
-        const msg = 'Python backend server is already running.';
+    if (pythonBackendProcess || isEngineConnected()) {
+        const msg = pythonBackendProcess
+            ? 'Python backend server is already running.'
+            : 'A backend is already connected and was started outside the dashboard.';
         if (res)
-            res.status(400).json({ error: msg });
+            res.status(409).json({ error: msg });
         logAndBroadcast(`Warning: ${msg}`);
+        broadcastProcessStatus();
         return;
     }
     const pythonExec = getPythonExecutable();
@@ -198,9 +211,12 @@ function startPythonBackend(res) {
 }
 function stopPythonBackend(res) {
     if (!pythonBackendProcess) {
-        const msg = 'Python backend process is not currently running.';
+        const external = isEngineConnected();
+        const msg = external
+            ? 'This backend was started outside the dashboard. Stop it where you launched it.'
+            : 'Python backend process is not currently running.';
         if (res)
-            res.status(400).json({ error: msg });
+            res.status(external ? 409 : 400).json({ error: msg });
         logAndBroadcast(`Warning: ${msg}`);
         return;
     }
@@ -232,10 +248,13 @@ app.get('/api/health', (_req, res) => {
 });
 // Process management REST endpoints
 app.get('/api/python/status', (_req, res) => {
+    const status = getProcessStatus();
     res.json({
-        building: isBuildingPython,
-        running: pythonBackendProcess !== null,
-        pid: pythonBackendProcess?.pid || null
+        building: status.building,
+        running: status.running,
+        managed: status.managed,
+        connected: status.connected,
+        pid: status.pid ?? null
     });
 });
 app.post('/api/python/build', (_req, res) => {
@@ -269,6 +288,7 @@ function connectToPythonEngine() {
             connected: true,
             message: 'Connected to EDAP Python Engine'
         });
+        broadcastProcessStatus();
     });
     engineWs.on('message', (data) => {
         try {
@@ -286,6 +306,7 @@ function connectToPythonEngine() {
             connected: false,
             message: 'Disconnected from Python Engine'
         });
+        broadcastProcessStatus();
         scheduleReconnect();
     });
     engineWs.on('error', (err) => {
@@ -310,13 +331,14 @@ function broadcastToClients(msgObj) {
 // Handle browser client connections
 wss.on('connection', (ws) => {
     console.log('[Dashboard TS Server] Browser client connected.');
-    const isEngineConnected = engineWs !== null && engineWs.readyState === ws_1.default.OPEN;
+    const connected = isEngineConnected();
     const statusMsg = {
         type: 'engine_status',
-        connected: isEngineConnected,
-        message: isEngineConnected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
+        connected,
+        message: connected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
     };
     ws.send(JSON.stringify(statusMsg));
+    ws.send(JSON.stringify(getProcessStatus()));
     ws.on('message', (message) => {
         try {
             const parsed = JSON.parse(message.toString());

@@ -27,6 +27,18 @@ function requestStatus(url, headers = {}, method = 'GET') {
   });
 }
 
+function waitForMessage(socket, predicate) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { cleanup(); reject(new Error('Timed out waiting for status')); }, 10000);
+    const receive = payload => {
+      const message = JSON.parse(payload);
+      if (predicate(message)) { cleanup(); resolve(message); }
+    };
+    const cleanup = () => { clearTimeout(timer); socket.off('message', receive); };
+    socket.on('message', receive);
+  });
+}
+
 for (const entry of ['dist/server.js', 'server.js']) {
   test(`${entry}: local control boundary`, { timeout: 20000 }, async t => {
     const engine = new WebSocket.Server({ host: '127.0.0.1', port: 0 });
@@ -82,11 +94,11 @@ for (const entry of ['dist/server.js', 'server.js']) {
       }
       if (entry === 'dist/server.js') {
         const status = await (await fetch(`${origin}/api/python/status`)).json();
-        assert.deepEqual(status, { building: false, running: false, pid: null });
-        // A same-origin request reaches the handler, which reports no backend to stop.
+        assert.deepEqual(status, { building: false, running: true, managed: false, connected: true, pid: null });
+        // The connected external backend cannot be stopped by the dashboard.
         assert.equal((await fetch(`${origin}/api/python/stop`, {
           method: 'POST', headers: { Origin: origin }
-        })).status, 400);
+        })).status, 409);
       }
     });
 
@@ -133,5 +145,49 @@ for (const entry of ['dist/server.js', 'server.js']) {
       assert.equal((await fetch(`${origin}/api/health`)).status, 200);
       assert.deepEqual(commands, ['ping']);
     });
+
+    if (entry === 'dist/server.js') {
+      await t.test('new clients receive external backend status and cannot start or stop it', async () => {
+        for (let visit = 0; visit < 2; visit++) {
+          const ws = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+          t.after(() => ws.terminate());
+          const status = await waitForMessage(ws, msg => msg.type === 'process_status');
+          assert.equal(status.running, true);
+          assert.equal(status.connected, true);
+          assert.equal(status.managed, false);
+          assert.equal(status.pid, undefined);
+          const unchanged = waitForMessage(ws, msg => msg.type === 'process_status');
+          ws.send(JSON.stringify({ command: 'start_python_backend' }));
+          assert.equal((await unchanged).managed, false);
+          ws.terminate();
+        }
+        for (const action of ['start', 'stop']) {
+          const response = await fetch(`${origin}/api/python/${action}`, {
+            method: 'POST', headers: { Origin: origin }
+          });
+          assert.equal(response.status, 409);
+        }
+        assert.deepEqual(await (await fetch(`${origin}/api/python/status`)).json(), {
+          building: false, running: true, managed: false, connected: true, pid: null
+        });
+      });
+
+      await t.test('external disconnect and reconnect update live status', async () => {
+        const ws = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => ws.terminate());
+        await waitForMessage(ws, msg => msg.type === 'process_status');
+        const disconnected = waitForMessage(ws, msg => msg.type === 'process_status' && !msg.connected);
+        const reconnected = waitForMessage(ws, msg => msg.type === 'process_status' && msg.connected);
+        for (const peer of engine.clients) peer.terminate();
+        assert.equal((await disconnected).running, false);
+        assert.deepEqual(await (await fetch(`${origin}/api/python/status`)).json(), {
+          building: false, running: false, managed: false, connected: false, pid: null
+        });
+        const status = await reconnected;
+        assert.equal(status.running, true);
+        assert.equal(status.managed, false);
+        ws.terminate();
+      });
+    }
   });
 }

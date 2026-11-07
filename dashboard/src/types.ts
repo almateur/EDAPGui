@@ -48,6 +48,8 @@ export interface ProcessStatusMessage {
   type: 'process_status';
   building: boolean;
   running: boolean;
+  managed: boolean;
+  connected: boolean;
   pid?: number;
   message?: string;
 }
