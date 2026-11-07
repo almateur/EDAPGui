@@ -213,6 +213,8 @@ Configuration is optional for the default local setup:
 
 Set these in the dashboard process environment so its Python child inherits them. If changing `EDAP_PORT`, update `ENGINE_WS_URL` to match. The backend can also run separately with `python backend_server.py`; in that case, its process is managed separately from the dashboard's start/stop controls.
 
+A connected backend started in another terminal appears as **Running (started separately)**. Its Start/Stop buttons are hidden, and the dashboard will not launch a duplicate or stop that external process. A backend started by the dashboard shows its PID and can be stopped there. Status is refreshed on page reload and when the backend connects or disconnects. The `/api/python/status` response distinguishes `running`, `connected`, and `managed`; a PID is available only for the process the dashboard started.
+
 ### Local control security
 
 The dashboard binds to `127.0.0.1`; the Python backend also defaults to loopback and rejects public bind addresses. These services trust local processes and do not provide remote-user authentication. Do not expose them through a reverse proxy, tunnel, or port forward. Remote access requires a separate authenticated design.
@@ -226,6 +228,10 @@ curl --fail --request POST --header 'Origin: http://127.0.0.1:3000' http://127.0
 Native WebSocket clients connecting to the dashboard must set `Origin: http://127.0.0.1:3000` (adjust the port and loopback hostname to match their connection). The Python engine accepts only native connections without an Origin header; browsers must go through the dashboard. Control messages are limited to 64 KiB.
 
 The network waypoint loader accepts only existing `.json` files under the repository's `waypoints/` directory, up to 1 MiB. Parent-directory traversal and symlinks pointing outside that directory are rejected. This restriction applies to the WebSocket backend; the desktop file picker is unchanged.
+
+In the web dashboard, **Load File** opens the browser's file picker. Select a waypoint JSON file of at most 1 MiB. The dashboard validates it, imports a uniquely named `waypoints/imported-*.json` copy, and asks the connected Python backend to load that copy. The selected original is not overwritten. The UI reports success only after the backend confirms; invalid files, disconnected backends, and load failures appear below the picker. Imported copies and their progress files are ignored by Git.
+
+After updating this file-loading feature, rebuild the dashboard and restart both the Node dashboard server and the Python backend so the UI and backend use the same confirmation protocol.
 
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 

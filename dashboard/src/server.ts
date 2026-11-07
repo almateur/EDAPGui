@@ -1,11 +1,12 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import http from 'http';
 import path from 'path';
 import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket, { WebSocketServer } from 'ws';
-import { CommandMessage, ServerToClientMessage } from './types';
+import { CommandMessage, ProcessStatusMessage, ServerToClientMessage } from './types';
 import { createLocalAccess } from '../security';
+import { importWaypointFile, MAX_WAYPOINT_BYTES, WaypointFileError } from './waypointFiles';
 
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
@@ -30,14 +31,26 @@ function getPythonExecutable(): string {
   return process.platform === 'win32' ? 'python' : 'python3';
 }
 
-function broadcastProcessStatus(extraMessage?: string): void {
-  broadcastToClients({
+function isEngineConnected(): boolean {
+  return engineWs !== null && engineWs.readyState === WebSocket.OPEN;
+}
+
+function getProcessStatus(extraMessage?: string): ProcessStatusMessage {
+  const managed = pythonBackendProcess !== null;
+  const connected = isEngineConnected();
+  return {
     type: 'process_status',
     building: isBuildingPython,
-    running: pythonBackendProcess !== null,
+    running: managed || connected,
+    managed,
+    connected,
     pid: pythonBackendProcess?.pid,
     message: extraMessage
-  });
+  };
+}
+
+function broadcastProcessStatus(extraMessage?: string): void {
+  broadcastToClients(getProcessStatus(extraMessage));
 }
 
 function logAndBroadcast(message: string): void {
@@ -116,10 +129,13 @@ function buildPythonEnvironment(res?: Response): void {
 }
 
 function startPythonBackend(res?: Response): void {
-  if (pythonBackendProcess) {
-    const msg = 'Python backend server is already running.';
-    if (res) res.status(400).json({ error: msg });
+  if (pythonBackendProcess || isEngineConnected()) {
+    const msg = pythonBackendProcess
+      ? 'Python backend server is already running.'
+      : 'A backend is already connected and was started outside the dashboard.';
+    if (res) res.status(409).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
+    broadcastProcessStatus();
     return;
   }
 
@@ -178,8 +194,11 @@ function startPythonBackend(res?: Response): void {
 
 function stopPythonBackend(res?: Response): void {
   if (!pythonBackendProcess) {
-    const msg = 'Python backend process is not currently running.';
-    if (res) res.status(400).json({ error: msg });
+    const external = isEngineConnected();
+    const msg = external
+      ? 'This backend was started outside the dashboard. Stop it where you launched it.'
+      : 'Python backend process is not currently running.';
+    if (res) res.status(external ? 409 : 400).json({ error: msg });
     logAndBroadcast(`Warning: ${msg}`);
     return;
   }
@@ -207,6 +226,32 @@ const publicPathDev = path.join(__dirname, '../public');
 
 app.use(express.static(publicPath));
 app.use(express.static(publicPathDev));
+
+app.post('/api/waypoints/import', (_req: Request, res: Response, next: NextFunction) => {
+  if (!isEngineConnected()) {
+    res.status(503).json({ error: 'Connect the Python backend before loading a waypoint file.' });
+    return;
+  }
+  next();
+}, express.raw({ type: 'application/json', limit: MAX_WAYPOINT_BYTES, inflate: false }),
+(req: Request, res: Response) => {
+  if (!Buffer.isBuffer(req.body)) {
+    res.status(415).json({ error: 'Waypoint files must be sent as application/json.' });
+    return;
+  }
+  try {
+    res.status(201).json({ filepath: importWaypointFile(req.body, ROOT_DIR) });
+  } catch (error) {
+    if (error instanceof WaypointFileError) res.status(400).json({ error: error.message });
+    else {
+      console.error('[Dashboard TS Server] Waypoint import failed:', error);
+      res.status(500).json({ error: 'Unable to save the imported waypoint file.' });
+    }
+  }
+}, (error: { type?: string }, _req: Request, res: Response, _next: NextFunction) => {
+  res.status(error.type === 'entity.too.large' ? 413 : 400)
+    .json({ error: error.type === 'entity.too.large' ? 'Waypoint files must be at most 1 MiB.' : 'Unable to read the waypoint file.' });
+});
 app.use(express.json());
 
 // API route health check
@@ -216,10 +261,13 @@ app.get('/api/health', (_req: Request, res: Response) => {
 
 // Process management REST endpoints
 app.get('/api/python/status', (_req: Request, res: Response) => {
+  const status = getProcessStatus();
   res.json({
-    building: isBuildingPython,
-    running: pythonBackendProcess !== null,
-    pid: pythonBackendProcess?.pid || null
+    building: status.building,
+    running: status.running,
+    managed: status.managed,
+    connected: status.connected,
+    pid: status.pid ?? null
   });
 });
 
@@ -261,6 +309,7 @@ function connectToPythonEngine(): void {
       connected: true,
       message: 'Connected to EDAP Python Engine'
     });
+    broadcastProcessStatus();
   });
 
   engineWs.on('message', (data: WebSocket.RawData) => {
@@ -279,6 +328,7 @@ function connectToPythonEngine(): void {
       connected: false,
       message: 'Disconnected from Python Engine'
     });
+    broadcastProcessStatus();
     scheduleReconnect();
   });
 
@@ -308,13 +358,14 @@ function broadcastToClients(msgObj: ServerToClientMessage): void {
 wss.on('connection', (ws: WebSocket) => {
   console.log('[Dashboard TS Server] Browser client connected.');
 
-  const isEngineConnected = engineWs !== null && engineWs.readyState === WebSocket.OPEN;
+  const connected = isEngineConnected();
   const statusMsg: ServerToClientMessage = {
     type: 'engine_status',
-    connected: isEngineConnected,
-    message: isEngineConnected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
+    connected,
+    message: connected ? 'Connected to EDAP Python Engine' : 'Waiting for Python Engine...'
   };
   ws.send(JSON.stringify(statusMsg));
+  ws.send(JSON.stringify(getProcessStatus()));
 
   ws.on('message', (message: WebSocket.RawData) => {
     try {

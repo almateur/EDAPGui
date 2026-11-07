@@ -44,10 +44,19 @@ export interface PongMessage {
   type: 'pong';
 }
 
+export interface WaypointLoadResult {
+  type: 'waypoint_load_result';
+  request_id: string;
+  success: boolean;
+  message: string;
+}
+
 export interface ProcessStatusMessage {
   type: 'process_status';
   building: boolean;
   running: boolean;
+  managed: boolean;
+  connected: boolean;
   pid?: number;
   message?: string;
 }
@@ -58,10 +67,12 @@ export type ServerToClientMessage =
   | LogMessage
   | ScreenshotMessage
   | PongMessage
+  | WaypointLoadResult
   | ProcessStatusMessage;
 
 export interface CommandMessage {
   command: string;
   filepath?: string;
+  request_id?: string;
   enabled?: boolean;
 }

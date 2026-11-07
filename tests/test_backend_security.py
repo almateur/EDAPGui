@@ -65,6 +65,36 @@ class BackendNetworkSecurityTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(caught.exception.rcvd.code, 1009)
         self.assertFalse(self.task.done())
 
+    async def test_waypoint_loads_return_correlated_success_and_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            routes = Path(directory) / 'waypoints'
+            routes.mkdir()
+            (routes / 'route.json').write_text('{}')
+            self.server.ed_ap = Mock()
+            with patch.object(backend_server, 'WAYPOINT_DIR', routes):
+                async with websockets.connect(self.url) as ws:
+                    for accepted in [True, False]:
+                        self.server.ed_ap.waypoint.load_waypoint_file.return_value = accepted
+                        request_id = f'load-{accepted}'
+                        await ws.send(json.dumps({'command': 'load_waypoint_file',
+                                                  'filepath': 'waypoints/route.json', 'request_id': request_id}))
+                        async with asyncio.timeout(3):
+                            while True:
+                                result = json.loads(await ws.recv())
+                                if result.get('type') == 'waypoint_load_result':
+                                    break
+                        self.assertEqual(result['request_id'], request_id)
+                        self.assertEqual(result['success'], accepted)
+                    await ws.send(json.dumps({'command': 'load_waypoint_file',
+                                              'filepath': '../outside.json', 'request_id': 'denied'}))
+                    async with asyncio.timeout(3):
+                        while True:
+                            result = json.loads(await ws.recv())
+                            if result.get('type') == 'waypoint_load_result':
+                                break
+                    self.assertEqual(result['request_id'], 'denied')
+                    self.assertFalse(result['success'])
+
 
 class BackendInputSecurityTests(unittest.IsolatedAsyncioTestCase):
     async def test_public_bind_is_rejected_before_engine_initialization(self):
