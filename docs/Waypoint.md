@@ -6,16 +6,25 @@ Waypoint JSON files define the systems the autopilot visits in order.
 
 Use [waypoints/sample-route.json](../waypoints/sample-route.json) as a starting point. It includes the required `GlobalShoppingList` and two travel-only example destinations: **Eravate**, then **Kremainn**. Shopping lists are empty, station names and bookmarks are unset, fleet carrier transfers are disabled, and the route does not repeat.
 
-1. Copy the sample and edit each numbered entry's `SystemName` to choose your destinations. Keep `GlobalShoppingList` even when you do not want to trade.
-2. In the web dashboard, click **Load File** and select the JSON file. Wait for the backend confirmation. The dashboard imports a copy; your selected original is unchanged.
-3. Loading a file does not start travel. Enable **Waypoint Assist** separately when ready to follow the route.
+1. In the web dashboard, click **Load File** and select the sample or your own JSON file. With the backend connected and Waypoint Assist stopped, wait for the backend confirmation. The dashboard imports a copy; your selected original is unchanged.
+2. Select destinations in the route timeline and edit their **System** fields to choose your destinations. Use **Apply changes** to load your edits into the backend, and **Download JSON** to save your own route file.
+3. Loading or applying a file does not start travel. Enable **Waypoint Assist** separately when ready to follow the route.
 
 Each numbered entry starts with `Skip: false` and `Completed: false`. Set `Skip` to `true` to disable an entry. For another run, use a fresh copy or reset the completion flags.
 
 For each destination, the autopilot plots a course to `SystemName` in the Galaxy Map and follows it with FSD Route Assist. An empty `StationName` and disabled bookmarks mean that reaching the system completes the waypoint without docking. After the final waypoint, the autopilot goes idle. Progress updates set each reached waypoint's `Completed` flag to `true` in the active route file.
 
 ## Waypoint Editor
-The simplest way to configure a waypoint file is to use the Waypoint Editor tool (with installer) written in C#, available here: [EDAP-Waypoint-Editor](https://github.com/Stumpii/EDAP-Waypoint-Editor). At some point, the features will be added to ED_AP.
+
+The web dashboard includes a route editor. Its connected timeline shows travel order, systems, stations, trading stops, and saved skipped/completed flags. Select a stop to change its fields, use the up/down controls to reorder it, or add/remove destinations. **Reset completion** clears all completion flags for another run. **Repeat route** adds a final `REPEAT` entry; move it back to the end if validation flags its position.
+
+Each stop has editable buy/sell commodity rows and bookmark settings. Commodity quantities must be nonnegative whole numbers; the `All` commodity with quantity `0` remains supported. Expand **Global shopping list** to edit the shared purchases and count updates. The engine ignores the global list's `Skip` field; the editor retains it for file compatibility. Unknown extra JSON fields are retained when saving.
+
+**Apply changes** validates the draft and loads a new working copy after Python confirms it. Stop Waypoint Assist first. **Download JSON** exports the draft in its displayed order. **Undo edits** restores the last opened or applied version. Opening another file or leaving the page warns when you have edits that have not been applied or downloaded. Offline opening, editing, and downloading also work.
+
+The timeline's flags are the state from the opened file and your edits. To inspect progress written by the autopilot, reopen its saved route file. The current-system badge follows live telemetry.
+
+The standalone C# [EDAP-Waypoint-Editor](https://github.com/Stumpii/EDAP-Waypoint-Editor) is also available.
 
 ## Repeating Waypoints
 A set of waypoints can be endlessly repeated by using a special row at the end of the waypoint file with the system name as **'REPEAT'**. When hitting this record and as long as **Skip** is not ture, the Waypoint Assist will start from the top jumping through the defined Systems until the user ends the Waypoint Assist.

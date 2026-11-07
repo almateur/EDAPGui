@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, nextTick } from 'vue';
+import { ref, reactive, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
+import WaypointRouteEditor from './WaypointRouteEditor.vue';
+import { parseWaypointRoute, serializeWaypointRoute, MAX_WAYPOINT_BYTES, type WaypointRoute } from './waypointRoute';
 import type { TelemetryData, ServerToClientMessage, CommandMessage } from './types';
 
 // Reactive state
@@ -17,6 +19,19 @@ const waypointFileInput = ref<HTMLInputElement | null>(null);
 const isLoadingWaypoint = ref(false);
 const waypointMessage = ref('');
 const waypointError = ref(false);
+const waypointRoute = ref<WaypointRoute | null>(null);
+const originalRouteJSON = ref('');
+const appliedRouteJSON = ref('');
+const downloadedRouteJSON = ref('');
+let pendingRouteJSON: string | null = null;
+const routeValidation = computed(() => {
+  if (!waypointRoute.value) return { json: '', error: '' };
+  try { return { json: serializeWaypointRoute(waypointRoute.value), error: '' }; }
+  catch (error) { return { json: '', error: error instanceof Error ? error.message : 'Invalid route.' }; }
+});
+const hasRouteEdits = computed(() => !!waypointRoute.value && (!!routeValidation.value.error || routeValidation.value.json !== originalRouteJSON.value));
+const hasUnsavedRouteEdits = computed(() => hasRouteEdits.value && (!routeValidation.value.json || routeValidation.value.json !== downloadedRouteJSON.value));
+const routeApplied = computed(() => !!routeValidation.value.json && routeValidation.value.json === appliedRouteJSON.value);
 let pendingWaypointRequest: string | null = null;
 let waypointLoadTimer: ReturnType<typeof setTimeout> | null = null;
 const logConsole = ref<HTMLElement | null>(null);
@@ -118,6 +133,10 @@ function handleServerMessage(msg: ServerToClientMessage): void {
       debugImageSrc.value = msg.image;
     }
   } else if (msg.type === 'waypoint_load_result' && msg.request_id === pendingWaypointRequest) {
+    if (msg.success && pendingRouteJSON) {
+      appliedRouteJSON.value = pendingRouteJSON;
+      originalRouteJSON.value = pendingRouteJSON;
+    }
     finishWaypointLoad(`${waypointFilename.value}: ${msg.message}`, !msg.success);
   }
 }
@@ -180,6 +199,7 @@ function finishWaypointLoad(message: string, error = false): void {
   if (waypointLoadTimer) clearTimeout(waypointLoadTimer);
   waypointLoadTimer = null;
   pendingWaypointRequest = null;
+  pendingRouteJSON = null;
   isLoadingWaypoint.value = false;
   waypointMessage.value = message;
   waypointError.value = error;
@@ -190,18 +210,42 @@ async function onWaypointFileSelected(event: Event): Promise<void> {
   const file = input.files?.[0];
   input.value = ''; // Selecting the same file again must also trigger change.
   if (!file || isLoadingWaypoint.value) return;
-  waypointFilename.value = file.name;
-  waypointMessage.value = `Loading ${file.name}...`;
-  waypointError.value = false;
+  if (hasUnsavedRouteEdits.value && !window.confirm('Discard the edits to this route and open another file? Download JSON to keep your changes.')) return;
   isLoadingWaypoint.value = true;
   try {
     if (!file.name.toLowerCase().endsWith('.json')) throw new Error('Choose a JSON waypoint file.');
-    if (file.size > 1024 * 1024) throw new Error('Waypoint files must be at most 1 MiB.');
-    try { JSON.parse(await file.text()); }
-    catch { throw new Error('The selected file is not valid JSON.'); }
-    if (!isConnected.value) throw new Error('Connect the Python backend before loading a waypoint file.');
+    if (file.size > MAX_WAYPOINT_BYTES) throw new Error('Waypoint files must be at most 1 MiB.');
+    const route = parseWaypointRoute(await file.text());
+    waypointRoute.value = route;
+    waypointFilename.value = file.name;
+    originalRouteJSON.value = serializeWaypointRoute(route);
+    appliedRouteJSON.value = '';
+    downloadedRouteJSON.value = '';
+    isLoadingWaypoint.value = false;
+    if (!isConnected.value) {
+      finishWaypointLoad('Route opened for editing. Connect the Python backend to apply it, or download your JSON.');
+    } else if (telemetry.assists.waypoint) {
+      finishWaypointLoad('Route opened for editing. Stop Waypoint Assist before applying it.');
+    } else {
+      await applyWaypointRoute();
+    }
+  } catch (error) {
+    finishWaypointLoad(error instanceof Error ? error.message : 'Unable to open the waypoint file.', true);
+  }
+}
+
+async function applyWaypointRoute(): Promise<void> {
+  if (!waypointRoute.value || isLoadingWaypoint.value) return;
+  isLoadingWaypoint.value = true;
+  waypointMessage.value = `Applying ${waypointFilename.value}...`;
+  waypointError.value = false;
+  try {
+    const json = serializeWaypointRoute(waypointRoute.value);
+    if (!waypointRoute.value.stops.length) throw new Error('Add a stop before applying this route.');
+    if (!isConnected.value) throw new Error('Connect the Python backend before applying a waypoint route.');
+    if (telemetry.assists.waypoint) throw new Error('Stop Waypoint Assist before applying a route.');
     const response = await fetch('/api/waypoints/import', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: file
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: json
     });
     if (!response.ok) {
       let message = 'Unable to import the waypoint file.';
@@ -210,13 +254,36 @@ async function onWaypointFileSelected(event: Event): Promise<void> {
     }
     const { filepath } = await response.json() as { filepath: string };
     if (!isConnected.value) throw new Error('The Python backend disconnected before loading the file.');
+    pendingRouteJSON = json;
     pendingWaypointRequest = crypto.randomUUID();
     waypointLoadTimer = setTimeout(() => finishWaypointLoad('The backend did not confirm loading the file. Check the Python terminal for errors before retrying.', true), 15000);
     if (!sendCommand('load_waypoint_file', { filepath, request_id: pendingWaypointRequest })) {
       throw new Error('The dashboard connection is unavailable.');
     }
   } catch (error) {
-    finishWaypointLoad(error instanceof Error ? error.message : 'Unable to load the waypoint file.', true);
+    finishWaypointLoad(error instanceof Error ? error.message : 'Unable to apply the waypoint route.', true);
+  }
+}
+
+function downloadWaypointRoute(): void {
+  if (!routeValidation.value.json) return;
+  const url = URL.createObjectURL(new Blob([routeValidation.value.json], { type: 'application/json' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = waypointFilename.value.replace(/\.json$/i, '') + '-edited.json';
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  downloadedRouteJSON.value = routeValidation.value.json;
+}
+
+function undoRouteEdits(): void {
+  if (originalRouteJSON.value) waypointRoute.value = parseWaypointRoute(originalRouteJSON.value);
+}
+
+function protectRouteEdits(event: BeforeUnloadEvent): void {
+  if (hasUnsavedRouteEdits.value) {
+    event.preventDefault();
+    event.returnValue = '';
   }
 }
 
@@ -234,7 +301,9 @@ function clearLogs(): void {
 
 onMounted(() => {
   initWebSocket();
+  window.addEventListener('beforeunload', protectRouteEdits);
 });
+onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdits));
 </script>
 
 <template>
@@ -383,17 +452,6 @@ onMounted(() => {
             </button>
           </div>
         </div>
-
-        <!-- Waypoint File Loader Card -->
-        <div class="card waypoint-card">
-          <h2><span class="icon">📁</span> Waypoint Route</h2>
-          <div class="input-group">
-            <input type="text" :value="waypointFilename" readonly aria-label="Selected waypoint file" placeholder="Choose a waypoint JSON file">
-            <input ref="waypointFileInput" type="file" accept=".json,application/json" hidden @change="onWaypointFileSelected">
-            <button class="btn btn-accent" :disabled="isLoadingWaypoint" @click="loadWaypointFile">{{ isLoadingWaypoint ? 'Loading...' : 'Load File' }}</button>
-          </div>
-          <p v-if="waypointMessage" :role="waypointError ? 'alert' : 'status'">{{ waypointMessage }}</p>
-        </div>
       </section>
 
       <!-- Right Column: Live Debug Stream & Console Logs -->
@@ -434,6 +492,45 @@ onMounted(() => {
           </div>
         </div>
       </section>
+      <section class="card waypoint-card">
+        <div class="card-header">
+          <h2><span class="icon">📁</span> Waypoint Route</h2>
+          <span v-if="waypointRoute" class="route-state" :class="{ edited: hasRouteEdits, applied: routeApplied }">{{ hasRouteEdits ? 'Edited draft' : routeApplied ? 'Applied to backend' : 'Local preview' }}</span>
+        </div>
+        <div class="input-group">
+          <input type="text" :value="waypointFilename" readonly aria-label="Selected waypoint file" placeholder="Choose a waypoint JSON file">
+          <input ref="waypointFileInput" type="file" accept=".json,application/json" hidden @change="onWaypointFileSelected">
+          <button class="btn btn-accent" :disabled="isLoadingWaypoint" @click="loadWaypointFile">{{ isLoadingWaypoint ? 'Loading...' : 'Load File' }}</button>
+        </div>
+        <p v-if="waypointMessage" :role="waypointError ? 'alert' : 'status'">{{ waypointMessage }}</p>
+        <template v-if="waypointRoute">
+          <WaypointRouteEditor v-model="waypointRoute" :busy="isLoadingWaypoint" :current-system="telemetry.system" />
+          <p v-if="routeValidation.error" class="route-validation" role="alert">{{ routeValidation.error }}</p>
+          <div class="route-save-bar">
+            <p>{{ telemetry.assists.waypoint ? 'Stop Waypoint Assist to apply a route.' : 'Apply saves a working copy for the backend. Download JSON keeps a file on your computer.' }}</p>
+            <div class="route-save-actions">
+              <button class="btn btn-sm btn-outline" :disabled="isLoadingWaypoint || !hasRouteEdits" @click="undoRouteEdits">Undo edits</button>
+              <button class="btn btn-secondary" :disabled="isLoadingWaypoint || !!routeValidation.error" @click="downloadWaypointRoute">Download JSON</button>
+              <button class="btn btn-accent" :disabled="isLoadingWaypoint || !!routeValidation.error || !waypointRoute.stops.length || !isConnected || telemetry.assists.waypoint" @click="applyWaypointRoute">{{ isLoadingWaypoint ? 'Applying...' : 'Apply changes' }}</button>
+            </div>
+          </div>
+        </template>
+        <p v-else class="route-empty">Load a waypoint file to see its travel order and edit destinations, bookmarks, and trading. You can plan routes while the backend is offline.</p>
+      </section>
     </main>
   </div>
 </template>
+
+<style scoped>
+.waypoint-card { grid-column: 1 / -1; min-width: 0; }
+.route-state { color: var(--text-muted); font-size: .8rem; }
+.waypoint-card :deep(button:disabled) { opacity: .45; cursor: not-allowed; }
+.route-state.applied { color: var(--accent-green); }
+.route-state.edited { color: var(--accent-orange); }
+.route-validation { color: var(--accent-red); margin-top: 16px; font-size: .9rem; }
+.route-save-bar { display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin-top: 20px; padding-top: 20px; border-top: 1px solid var(--border-color); }
+.route-save-bar p, .route-empty { color: var(--text-muted); font-size: .85rem; }
+.route-save-bar p { flex: 1 1 260px; }
+.route-save-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.route-empty { margin-top: 16px; }
+</style>

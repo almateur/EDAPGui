@@ -262,7 +262,11 @@ Native WebSocket clients connecting to the dashboard must set `Origin: http://12
 
 The network waypoint loader accepts only existing `.json` files under the repository's `waypoints/` directory, up to 1 MiB. Parent-directory traversal and symlinks pointing outside that directory are rejected. This restriction applies to the WebSocket backend; the desktop file picker is unchanged.
 
-In the web dashboard, **Load File** opens the browser's file picker. Select a waypoint JSON file of at most 1 MiB. The dashboard validates it, imports a uniquely named `waypoints/imported-*.json` copy, and asks the connected Python backend to load that copy. The selected original is not overwritten. The UI reports success only after the backend confirms; invalid files, disconnected backends, and load failures appear below the picker. Imported copies and their progress files are ignored by Git.
+In the web dashboard, **Load File** opens the browser's file picker. Select a waypoint JSON file of at most 1 MiB, such as [waypoints/sample-route.json](waypoints/sample-route.json). The dashboard shows its destinations as a connected route timeline. With the backend connected and Waypoint Assist stopped, opening a file also imports a uniquely named `waypoints/imported-*.json` copy and asks Python to load it. The selected original is not overwritten. The UI reports success only after the backend confirms; validation and load failures appear below the picker. Imported copies and their progress files are ignored by Git.
+
+Select a stop in the timeline to edit its system, station, comment, bookmarks, completion flags, and buy/sell commodities. Add, remove, or move stops with the editor controls; the displayed order is the execution order, including when waypoint names are numeric. **Repeat route** adds a final `REPEAT` entry. The expandable **Global shopping list** edits purchases shared across stops. Badges and counts reflect the opened file and your draft; the current-system badge uses telemetry. Reopen a saved progress file to see updated completion flags.
+
+Edits stay in the browser until you use **Apply changes** to load a new working copy in Python, or **Download JSON** to keep the edited file on your computer. **Undo edits** returns to the most recently opened or successfully applied version. Stop Waypoint Assist before applying a replacement route. You can also open, edit, and download routes while the backend is offline, then apply them after reconnecting. Invalid destinations, duplicate waypoint names, invalid quantities, and a `REPEAT` entry before the end block apply/download until corrected.
 
 After updating this file-loading feature, rebuild the dashboard and restart both the Node dashboard server and the Python backend so the UI and backend use the same confirmation protocol.
 
@@ -292,6 +296,12 @@ npm audit
 Builds write to `dashboard/dist/` and `dashboard/dist-client/`, which contain tracked generated files. Review generated changes before committing. Cloud onboarding builds to an external runtime directory to preserve those files.
 
 For a functional smoke check, request `/api/health` and `/api/python/status` on the dashboard server, then start the backend and verify telemetry, an assist toggle, **STOP ALL ASSISTS**, and backend stop/restart in the browser. A WebSocket command `{"command":"ping"}` sent to the dashboard should receive `{"type":"pong"}` through the Python backend. A healthy HTTP response alone does not verify the backend connection.
+
+The route editor also has an automated Chromium check in `dashboard/tests/waypoint-editor.browser.py`. After building the dashboard, run it from the repository root using Python with `playwright` and `websockets` installed and Chromium available (`python -m playwright install chromium`, or set `EDAP_TEST_CHROMIUM` to a system browser). It starts temporary dashboard/mock-backend processes and covers editing, ordering, JSON download, confirmed/rejected apply, offline planning, and mobile layout. Set `EDAP_TEST_PYTHON` if the mock backend uses a different Python executable.
+
+```sh
+python dashboard/tests/waypoint-editor.browser.py
+```
 
 # Running ED_AP
 * With Elite Dangerous (ED) running, start ED_AP:

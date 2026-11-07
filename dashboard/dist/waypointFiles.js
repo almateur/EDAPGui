@@ -8,37 +8,20 @@ exports.importWaypointFile = importWaypointFile;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const crypto_1 = require("crypto");
-exports.MAX_WAYPOINT_BYTES = 1024 * 1024;
-class WaypointFileError extends Error {
-}
-exports.WaypointFileError = WaypointFileError;
+const waypointRoute_1 = require("./waypointRoute");
+var waypointRoute_2 = require("./waypointRoute");
+Object.defineProperty(exports, "MAX_WAYPOINT_BYTES", { enumerable: true, get: function () { return waypointRoute_2.MAX_WAYPOINT_BYTES; } });
+Object.defineProperty(exports, "WaypointFileError", { enumerable: true, get: function () { return waypointRoute_2.WaypointFileError; } });
 function importWaypointFile(contents, rootDir) {
-    if (contents.length > exports.MAX_WAYPOINT_BYTES)
-        throw new WaypointFileError('Waypoint files must be at most 1 MiB.');
-    let data;
-    try {
-        data = JSON.parse(contents.toString('utf8').replace(/^\uFEFF/, ''));
-    }
-    catch {
-        throw new WaypointFileError('Choose a valid JSON waypoint file.');
-    }
-    const isRecord = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
-    if (!isRecord(data) || !isRecord(data.GlobalShoppingList)) {
-        throw new WaypointFileError('Waypoint files must contain a GlobalShoppingList object.');
-    }
-    const waypointFields = ['SystemName', 'StationName', 'GalaxyBookmarkType', 'GalaxyBookmarkNumber',
-        'SystemBookmarkType', 'SystemBookmarkNumber', 'SellCommodities', 'BuyCommodities',
-        'UpdateCommodityCount', 'FleetCarrierTransfer', 'Skip', 'Completed'];
-    for (const [name, entry] of Object.entries(data)) {
-        const required = name === 'GlobalShoppingList' ? ['BuyCommodities', 'UpdateCommodityCount', 'Skip'] : waypointFields;
-        if (!isRecord(entry) || required.some(field => !Object.prototype.hasOwnProperty.call(entry, field))) {
-            throw new WaypointFileError(`Invalid waypoint entry: ${name}.`);
-        }
-    }
+    if (contents.length > waypointRoute_1.MAX_WAYPOINT_BYTES)
+        throw new waypointRoute_1.WaypointFileError('Waypoint files must be at most 1 MiB.');
+    const text = contents.toString('utf8').replace(/^\uFEFF/, '');
+    (0, waypointRoute_1.parseWaypointRoute)(text);
     // Match Python json.dump's ASCII escaping for the Windows desktop reader.
-    const serialized = Buffer.from(JSON.stringify(data).replace(/[\u007f-\uffff]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`));
-    if (serialized.length > exports.MAX_WAYPOINT_BYTES)
-        throw new WaypointFileError('Waypoint files must be at most 1 MiB.');
+    // Keep the validated text's ordering; stringifying an object sorts numeric keys.
+    const serialized = Buffer.from(text.replace(/[\u007f-\uffff]/g, character => `\\u${character.charCodeAt(0).toString(16).padStart(4, '0')}`));
+    if (serialized.length > waypointRoute_1.MAX_WAYPOINT_BYTES)
+        throw new waypointRoute_1.WaypointFileError('Waypoint files must be at most 1 MiB.');
     // Resolve the actual backend checkout, including cloud runtime symlinks.
     const sourceRoot = path_1.default.dirname(fs_1.default.realpathSync(path_1.default.join(rootDir, 'backend_server.py')));
     const waypointRoot = fs_1.default.realpathSync(path_1.default.join(sourceRoot, 'waypoints'));
