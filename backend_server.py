@@ -185,7 +185,11 @@ class EDAPEngineServer:
             return
 
         if cmd == "ping":
-            await ws.send(json.dumps({"type": "pong"}))
+            reply = {"type": "pong"}
+            if isinstance(data.get("request_id"), str):
+                reply["request_id"] = data["request_id"]
+                reply["capabilities"] = ["waypoint_load_result"]
+            await ws.send(json.dumps(reply))
             return
 
         if cmd == "start_fsd":

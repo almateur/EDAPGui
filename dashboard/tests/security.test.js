@@ -44,8 +44,14 @@ for (const entry of ['dist/server.js', 'server.js']) {
     const engine = new WebSocket.Server({ host: '127.0.0.1', port: 0 });
     await once(engine, 'listening');
     const commands = [];
+    let probeMode = 'supported';
     engine.on('connection', ws => ws.on('message', payload => {
       const data = JSON.parse(payload);
+      if (data.command === 'ping' && data.request_id?.startsWith('waypoint-capabilities-')) {
+        if (probeMode === 'supported') ws.send(JSON.stringify({ type: 'pong', request_id: data.request_id, capabilities: ['waypoint_load_result'] }));
+        if (probeMode === 'legacy') ws.send(JSON.stringify({ type: 'pong' }));
+        return;
+      }
       commands.push(data.command);
       if (data.command === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
     }));
@@ -161,6 +167,20 @@ for (const entry of ['dist/server.js', 'server.js']) {
         assert.equal((await fetch(`${origin}/api/waypoints/import`, {
           method: 'POST', headers: { Origin: origin, 'Content-Type': 'text/plain' }, body: '{}'
         })).status, 415);
+      });
+
+      await t.test('outdated or silent backends produce actionable import errors', async () => {
+        const headers = { Origin: origin, 'Content-Type': 'application/json' };
+        try {
+          probeMode = 'legacy';
+          let response = await fetch(`${origin}/api/waypoints/import`, { method: 'POST', headers, body: '{}' });
+          assert.equal(response.status, 409);
+          assert.match((await response.json()).error, /outdated.*restart backend_server\.py/);
+          probeMode = 'silent';
+          response = await fetch(`${origin}/api/waypoints/import`, { method: 'POST', headers, body: '{}' });
+          assert.equal(response.status, 503);
+          assert.match((await response.json()).error, /not responding/);
+        } finally { probeMode = 'supported'; }
       });
 
       await t.test('new clients receive external backend status and cannot start or stop it', async () => {

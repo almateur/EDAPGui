@@ -233,6 +233,8 @@ In the web dashboard, **Load File** opens the browser's file picker. Select a wa
 
 After updating this file-loading feature, rebuild the dashboard and restart both the Node dashboard server and the Python backend so the UI and backend use the same confirmation protocol.
 
+If loading reports that the backend is outdated, stop the **Python backend** with Ctrl+C and restart it from the updated checkout (for example, `.\.venv311\Scripts\python.exe .\backend_server.py` in PowerShell). Restarting only Node does not update a Python process that is already running. The dashboard checks support before importing; an unresponsive backend produces a connection error instead of silently waiting for a file-load reply. If a compatible backend still cannot confirm a load, inspect its terminal for the underlying error before retrying.
+
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 
 ### Development checks

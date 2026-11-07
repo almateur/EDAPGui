@@ -211,7 +211,7 @@ async function onWaypointFileSelected(event: Event): Promise<void> {
     const { filepath } = await response.json() as { filepath: string };
     if (!isConnected.value) throw new Error('The Python backend disconnected before loading the file.');
     pendingWaypointRequest = crypto.randomUUID();
-    waypointLoadTimer = setTimeout(() => finishWaypointLoad('The backend did not confirm loading the file. Try again.', true), 15000);
+    waypointLoadTimer = setTimeout(() => finishWaypointLoad('The backend did not confirm loading the file. Check the Python terminal for errors before retrying.', true), 15000);
     if (!sendCommand('load_waypoint_file', { filepath, request_id: pendingWaypointRequest })) {
       throw new Error('The dashboard connection is unavailable.');
     }

@@ -44,6 +44,7 @@ const child_process_1 = require("child_process");
 const ws_1 = __importStar(require("ws"));
 const security_1 = require("../security");
 const waypointFiles_1 = require("./waypointFiles");
+const backendProtocol_1 = require("./backendProtocol");
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
 const ROOT_DIR = path_1.default.resolve(__dirname, '../../');
@@ -242,9 +243,19 @@ const publicPath = path_1.default.join(__dirname, '../dist-client');
 const publicPathDev = path_1.default.join(__dirname, '../public');
 app.use(express_1.default.static(publicPath));
 app.use(express_1.default.static(publicPathDev));
-app.post('/api/waypoints/import', (_req, res, next) => {
-    if (!isEngineConnected()) {
+app.post('/api/waypoints/import', async (_req, res, next) => {
+    const backend = engineWs;
+    if (!backend || backend.readyState !== ws_1.default.OPEN) {
         res.status(503).json({ error: 'Connect the Python backend before loading a waypoint file.' });
+        return;
+    }
+    const compatible = await (0, backendProtocol_1.supportsWaypointConfirmation)(backend);
+    if (compatible === null) {
+        res.status(503).json({ error: 'The Python backend is not responding. Check its terminal and restart it before loading a file.' });
+        return;
+    }
+    if (!compatible) {
+        res.status(409).json({ error: 'The connected Python backend is outdated. Stop it with Ctrl+C and restart backend_server.py from the updated checkout, then retry.' });
         return;
     }
     next();

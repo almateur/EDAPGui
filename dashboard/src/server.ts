@@ -7,6 +7,7 @@ import WebSocket, { WebSocketServer } from 'ws';
 import { CommandMessage, ProcessStatusMessage, ServerToClientMessage } from './types';
 import { createLocalAccess } from '../security';
 import { importWaypointFile, MAX_WAYPOINT_BYTES, WaypointFileError } from './waypointFiles';
+import { supportsWaypointConfirmation } from './backendProtocol';
 
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
@@ -227,9 +228,19 @@ const publicPathDev = path.join(__dirname, '../public');
 app.use(express.static(publicPath));
 app.use(express.static(publicPathDev));
 
-app.post('/api/waypoints/import', (_req: Request, res: Response, next: NextFunction) => {
-  if (!isEngineConnected()) {
+app.post('/api/waypoints/import', async (_req: Request, res: Response, next: NextFunction) => {
+  const backend = engineWs;
+  if (!backend || backend.readyState !== WebSocket.OPEN) {
     res.status(503).json({ error: 'Connect the Python backend before loading a waypoint file.' });
+    return;
+  }
+  const compatible = await supportsWaypointConfirmation(backend);
+  if (compatible === null) {
+    res.status(503).json({ error: 'The Python backend is not responding. Check its terminal and restart it before loading a file.' });
+    return;
+  }
+  if (!compatible) {
+    res.status(409).json({ error: 'The connected Python backend is outdated. Stop it with Ctrl+C and restart backend_server.py from the updated checkout, then retry.' });
     return;
   }
   next();
