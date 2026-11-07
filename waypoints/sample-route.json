@@ -1,0 +1,47 @@
+{
+  "GlobalShoppingList": {
+    "SystemName": "",
+    "StationName": "",
+    "GalaxyBookmarkType": "",
+    "GalaxyBookmarkNumber": 0,
+    "SystemBookmarkType": "",
+    "SystemBookmarkNumber": 0,
+    "SellCommodities": {},
+    "BuyCommodities": {},
+    "Comment": "Travel-only sample: no global purchases.",
+    "UpdateCommodityCount": false,
+    "FleetCarrierTransfer": false,
+    "Skip": true,
+    "Completed": false
+  },
+  "1": {
+    "SystemName": "Eravate",
+    "StationName": "",
+    "GalaxyBookmarkType": "",
+    "GalaxyBookmarkNumber": 0,
+    "SystemBookmarkType": "",
+    "SystemBookmarkNumber": 0,
+    "SellCommodities": {},
+    "BuyCommodities": {},
+    "Comment": "First example destination. Replace SystemName with your chosen system.",
+    "UpdateCommodityCount": false,
+    "FleetCarrierTransfer": false,
+    "Skip": false,
+    "Completed": false
+  },
+  "2": {
+    "SystemName": "Kremainn",
+    "StationName": "",
+    "GalaxyBookmarkType": "",
+    "GalaxyBookmarkNumber": 0,
+    "SystemBookmarkType": "",
+    "SystemBookmarkNumber": 0,
+    "SellCommodities": {},
+    "BuyCommodities": {},
+    "Comment": "Final example destination. The route ends here without repeating.",
+    "UpdateCommodityCount": false,
+    "FleetCarrierTransfer": false,
+    "Skip": false,
+    "Completed": false
+  }
+}

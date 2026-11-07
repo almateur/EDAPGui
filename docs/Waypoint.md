@@ -1,29 +1,18 @@
 # Waypoints
-Waypoints are Systems that are captured in a waypoints.json file and read and processed by this Autopilot.  An example waypoint file is below:
 
-```py
-{
-  "1": {
-    "SystemName": "Mylaifai EP-G c27-631", "StationName": "", "GalaxyBookmarkType": "", "GalaxyBookmarkNumber": 0, "SystemBookmarkType": "", "SystemBookmarkNumber": 0, "SellCommodities": {}, "BuyCommodities": {}, "UpdateCommodityCount": false, "FleetCarrierTransfer": false, "Skip": false, "Completed": false
-  },
-  "2": {
-    "SystemName": "Striechooe QR-S b37-0", "StationName": "", "GalaxyBookmarkType": "", "GalaxyBookmarkNumber": 0, "SystemBookmarkType": "", "SystemBookmarkNumber": 0, "SellCommodities": {}, "BuyCommodities": {}, "UpdateCommodityCount": false, "FleetCarrierTransfer": false, "Skip": false, "Completed": false
-  },
-  "3": {
-    "SystemName": "Ploxao JV-E b31-1", "StationName": "", "GalaxyBookmarkType": "", "GalaxyBookmarkNumber": 0, "SystemBookmarkType": "", "SystemBookmarkNumber": 0, "SellCommodities": {}, "BuyCommodities": {}, "UpdateCommodityCount": false, "FleetCarrierTransfer": false, "Skip": false, "Completed": false
-  },
-  "4": {
-    "SystemName": "Beagle Point", "StationName": "", "GalaxyBookmarkType": "", "GalaxyBookmarkNumber": 0, "SystemBookmarkType": "", "SystemBookmarkNumber": 0, "SellCommodities": {}, "BuyCommodities": {}, "UpdateCommodityCount": false, "FleetCarrierTransfer": false, "Skip": false, "Completed": false
-  }
-}
-```
+Waypoint JSON files define the systems the autopilot visits in order.
 
-With this waypoint file this Autopilot will take you to Beagle Point without your intervention.  The Autopilot will read
-and process each row, plotting the course to that **SystemName** in the Galaxy Map and executing that route via the FSD Route 
-Assist.  When entering that System, if no **StationName** is defined (i.e. ''), the assist will plot the route for the next 
-row in this waypoint file.  The waypoint file is read in when selecting Waypoint Assist.  When reaching the final 
-waypoint, the Autopilot will go idle.  The Waypoint Assist writes to waypoints.json file, marking which Systems have
-been reached by setting the Completed entity to true.
+## Ready-to-load sample
+
+Use [waypoints/sample-route.json](../waypoints/sample-route.json) as a starting point. It includes the required `GlobalShoppingList` and two travel-only example destinations: **Eravate**, then **Kremainn**. Shopping lists are empty, station names and bookmarks are unset, fleet carrier transfers are disabled, and the route does not repeat.
+
+1. Copy the sample and edit each numbered entry's `SystemName` to choose your destinations. Keep `GlobalShoppingList` even when you do not want to trade.
+2. In the web dashboard, click **Load File** and select the JSON file. Wait for the backend confirmation. The dashboard imports a copy; your selected original is unchanged.
+3. Loading a file does not start travel. Enable **Waypoint Assist** separately when ready to follow the route.
+
+Each numbered entry starts with `Skip: false` and `Completed: false`. Set `Skip` to `true` to disable an entry. For another run, use a fresh copy or reset the completion flags.
+
+For each destination, the autopilot plots a course to `SystemName` in the Galaxy Map and follows it with FSD Route Assist. An empty `StationName` and disabled bookmarks mean that reaching the system completes the waypoint without docking. After the final waypoint, the autopilot goes idle. Progress updates set each reached waypoint's `Completed` flag to `true` in the active route file.
 
 ## Waypoint Editor
 The simplest way to configure a waypoint file is to use the Waypoint Editor tool (with installer) written in C#, available here: [EDAP-Waypoint-Editor](https://github.com/Stumpii/EDAP-Waypoint-Editor). At some point, the features will be added to ED_AP.
