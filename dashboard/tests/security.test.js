@@ -90,6 +90,22 @@ for (const entry of ['dist/server.js', 'server.js']) {
       }
     });
 
+    await t.test('external links can open the UI but cannot navigate to APIs or frame it', async () => {
+      const navigation = {
+        'Sec-Fetch-Site': 'cross-site',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Dest': 'document'
+      };
+      for (const page of ['/', '/index.html', '/?from=link']) {
+        assert.equal(await requestStatus(`${origin}${page}`, navigation), 200);
+      }
+      assert.equal(await requestStatus(`${origin}/api/health`, navigation), 403);
+      assert.equal(await requestStatus(`${origin}/api/python/start`, navigation, 'POST'), 403);
+      assert.equal(await requestStatus(`${origin}/`, { ...navigation, 'Sec-Fetch-Dest': 'iframe' }), 403);
+      assert.equal(await requestStatus(`${origin}/`, { ...navigation, Origin: 'null' }), 403);
+      assert.equal(await requestStatus(`${origin}/`, { ...navigation, Host: `attacker.example:${port}` }), 403);
+    });
+
     await t.test('WebSocket rejects foreign/null/missing Origin and forged Host', async () => {
       for (const headers of [
         {}, { Origin: 'https://attacker.example' }, { Origin: 'null' },

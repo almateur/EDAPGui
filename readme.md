@@ -217,7 +217,7 @@ Set these in the dashboard process environment so its Python child inherits them
 
 The dashboard binds to `127.0.0.1`; the Python backend also defaults to loopback and rejects public bind addresses. These services trust local processes and do not provide remote-user authentication. Do not expose them through a reverse proxy, tunnel, or port forward. Remote access requires a separate authenticated design.
 
-The dashboard checks the request Host and requires a matching Origin for browser WebSockets and state-changing HTTP requests. Requests from other websites, opaque origins, or unexpected hostnames are rejected. Command-line clients must also send the dashboard's origin, for example:
+The dashboard checks the request Host and requires a matching Origin for browser WebSockets and state-changing HTTP requests. Cross-site API/control requests, opaque origins, and unexpected hostnames are rejected. Following an external link to the dashboard page is allowed as a top-level browser navigation. Command-line clients must also send the dashboard's origin, for example:
 
 ```sh
 curl --fail --request POST --header 'Origin: http://127.0.0.1:3000' http://127.0.0.1:3000/api/python/start

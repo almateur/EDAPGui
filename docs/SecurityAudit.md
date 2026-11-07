@@ -37,7 +37,7 @@ The audit checked all 119 explicitly pinned Python distributions, including envi
 ## Validation and limits
 
 - Nine Python tests exercise backend lifecycle, native connectivity, browser-origin rejection, public-bind rejection, oversized commands, and waypoint traversal/symlink handling.
-- Ten Node test-runner checks exercise both the compiled TypeScript server and the legacy JavaScript server: legitimate local requests, forged Host and foreign/null/missing Origin, blocked process changes, forwarded ping/pong, and oversized-frame recovery.
+- Twelve Node test-runner checks exercise both the compiled TypeScript server and the legacy JavaScript server: legitimate local requests, external-link navigation to the UI, forged Host and foreign/null/missing Origin, blocked cross-site API/navigation and framing, blocked process changes, forwarded ping/pong, and oversized-frame recovery.
 - Client/server builds and Vue type checking pass. Vite now requires Node.js 20.19.x or Node.js 22.12+; its configuration uses the ESM `.mts` extension.
 - Chromium validates rendered UI, backend start/stop/restart, five mock assist toggles, stop-all, and forwarded WebSocket ping/pong without browser runtime errors.
 - The patched non-ML Python dependencies are installed in a separate validation environment and pass `pip check`. Pillow decodes, converts, and resizes all 46 repository images. PyTorch 2.13.0 and TorchVision 0.28.0 CPU builds pass tensor/native NMS checks; both shipped compass and target models load and complete CPU inference with the repository's Ultralytics version.
