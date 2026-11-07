@@ -90,7 +90,7 @@ Aids with colonization construction projects, determining what commodities are n
 # Installation
 _Requires **python 3** and **git**_
 
-_Python 3.11.9 is the recommended version of Python. The current requirements need Python 3.11 or newer: the pinned pandas 3.0.3 package requires it. Python 3.9 and 3.10 are no longer compatible with the full requirements file._
+_Use **64-bit Python 3.11**; Python 3.11.9 is the recommended Windows release. The pinned pandas 3.0.3 package requires Python 3.11 or newer, while PaddlePaddle 3.2.2 publishes Windows wheels only for 64-bit Python 3.9 through 3.13. Python 3.9/3.10, Python 3.14, and 32-bit Python are therefore incompatible with the full requirements file. Availability of a PaddlePaddle wheel alone does not establish compatibility of every dependency._
 If you don't have Python installed:
 * Here is a link to [Python 3.11.9 installer](https://www.python.org/downloads/release/python-3119/). 
 * Scroll to the bottom and select the installer with the description "Recommended".
@@ -138,6 +138,33 @@ The following error may occur:
 The error is usually as a result of mss incompatibility. Try pip install mss==8.0.3 or pip install mss==8.0.3.
 
 ## Troubleshooting
+
+### PaddlePaddle installation fails, then a module such as keyboard is missing
+
+`No matching distribution found for paddlepaddle==3.2.2` can indicate an unsupported Python version or architecture. Check the exact interpreter used to launch EDAP; installing a different system Python does not change an existing virtual environment. For an environment named `.venv`, run this in PowerShell from the repository root:
+
+```powershell
+.\.venv\Scripts\python.exe -c "import sys, struct; print(sys.version); print(struct.calcsize('P') * 8, 'bit'); print(sys.executable)"
+```
+
+If it reports Python 3.14 or a 32-bit interpreter, install 64-bit Python 3.11 and create a separate environment. These commands preserve the existing `.venv`:
+
+```powershell
+py -3.11 -m venv .venv311
+.\.venv311\Scripts\python.exe -m pip install --upgrade pip
+.\.venv311\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+Only after the full installation succeeds, launch with the same interpreter:
+
+```powershell
+.\.venv311\Scripts\python.exe .\EDAPGui.py
+```
+
+An installation that stops while resolving dependencies leaves the environment incomplete; a subsequent `ModuleNotFoundError: No module named 'keyboard'` is a consequence of that failed installation. Resolve the installation error and rerun the complete requirements installation. If the interpreter is already a supported 64-bit version, inspect the configured package index and pip's compatible wheel tags before changing dependency pins.
+
+### Check installed dependency versions
+
 If you receive python errors when running EDAP, it may be useful to check that all packages are installed correctly at the correct versions.
 [pipdeptree](https://pypi.org/project/pipdeptree/) is command line utility to show a dependency tree of packages. It also checks version compatability.
 Install and run. Review the text output for any warnings/errors. 
