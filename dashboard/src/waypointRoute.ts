@@ -174,3 +174,51 @@ export function moveWaypoint(route: WaypointRoute, id: number, offset: number): 
   const [stop] = route.stops.splice(index, 1);
   route.stops.splice(target, 0, stop);
 }
+
+export interface RemovedWaypoint { stop: StopDraft; index: number; nextId: number | null }
+
+export function removeWaypoints(route: WaypointRoute, ids: ReadonlySet<number>): RemovedWaypoint[] {
+  const removed: RemovedWaypoint[] = [];
+  let nextId: number | null = null;
+  for (let index = route.stops.length - 1; index >= 0; index--) {
+    const stop = route.stops[index];
+    if (ids.has(stop.id)) removed.push({ stop, index, nextId });
+    else nextId = stop.id;
+  }
+  route.stops = route.stops.filter(stop => !ids.has(stop.id));
+  return removed.reverse();
+}
+
+export function restoreWaypoints(route: WaypointRoute, removed: RemovedWaypoint[]): number {
+  const existing = new Set(route.stops.map(stop => stop.id));
+  const names = new Set(route.stops.map(stop => stop.key));
+  let renamed = 0;
+  for (const entry of removed) {
+    if (existing.has(entry.stop.id)) continue;
+    if (names.has(entry.stop.key)) {
+      const original = entry.stop.key;
+      let suffix = 1;
+      do { entry.stop.key = `${original} (restored${suffix === 1 ? '' : ` ${suffix}`})`; suffix++; }
+      while (names.has(entry.stop.key));
+      renamed++;
+    }
+    const anchor = route.stops.findIndex(stop => stop.id === entry.nextId);
+    route.stops.splice(anchor >= 0 ? anchor : Math.min(entry.index, route.stops.length), 0, entry.stop);
+    existing.add(entry.stop.id);
+    names.add(entry.stop.key);
+  }
+  return renamed;
+}
+
+export function moveWaypoints(route: WaypointRoute, ids: ReadonlySet<number>, direction: -1 | 1): void {
+  if (route.stops.length < 2 || ids.size === 0) return;
+  // Move each selected block one place, preserving both selected and unselected order.
+  const start = direction === -1 ? 1 : route.stops.length - 2;
+  const end = direction === -1 ? route.stops.length : -1;
+  for (let index = start; index !== end; index -= direction) {
+    const neighbor = index + direction;
+    if (ids.has(route.stops[index].id) && !ids.has(route.stops[neighbor].id)) {
+      [route.stops[index], route.stops[neighbor]] = [route.stops[neighbor], route.stops[index]];
+    }
+  }
+}
