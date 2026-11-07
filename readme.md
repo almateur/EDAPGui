@@ -194,9 +194,10 @@ Build and start the dashboard:
 ```sh
 cd dashboard
 npm ci
-npm run build
-npm run server
+npm start
 ```
+
+`npm start` builds the client and server before launching the dashboard. To run a previously built copy, use `npm run server` after `npm run build`.
 
 The dashboard listens on port 3000. Select **Start Python Backend** in the dashboard to start the Python process, then wait for **Connected to EDAP Python Engine**. In mock mode, assist buttons update simulated state and logs; ship/system values remain unknown. **Stop Python Backend** stops the managed process.
 
@@ -295,7 +296,7 @@ npm test
 npm audit
 ```
 
-Builds write to `dashboard/dist/` and `dashboard/dist-client/`, which contain tracked generated files. Review generated changes before committing. Cloud onboarding builds to an external runtime directory to preserve those files.
+Builds write generated files to `dashboard/dist/` and `dashboard/dist-client/`. Both directories are ignored by Git; commit dashboard source and the npm lockfile. A fresh checkout needs a build before `npm run server`; `npm start` runs that build automatically.
 
 For a functional smoke check, request `/api/health` and `/api/python/status` on the dashboard server, then start the backend and verify telemetry, an assist toggle, **STOP ALL ASSISTS**, and backend stop/restart in the browser. A WebSocket command `{"command":"ping"}` sent to the dashboard should receive `{"type":"pong"}` through the Python backend. A healthy HTTP response alone does not verify the backend connection.
 

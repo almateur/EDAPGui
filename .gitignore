@@ -29,5 +29,9 @@ runs/
 node_modules/
 dashboard/node_modules/
 
+# Dashboard build output (regenerate with npm run build or npm start)
+/dashboard/dist/
+/dashboard/dist-client/
+
 # Browser-selected waypoint copies and their saved progress
 /waypoints/imported-*.json
