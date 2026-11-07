@@ -16,6 +16,7 @@ import signal
 import threading
 from datetime import datetime
 from pathlib import Path
+from calibration_status import CALIBRATION_FILE, CALIBRATION_HELP, ASSIST_REGIONS, inspect_calibration
 
 import websockets
 from websockets.exceptions import ConnectionClosed
@@ -70,6 +71,26 @@ class EDAPEngineServer:
             }
         }
         self.debug_stream_active = False
+        self.calibration_file = CALIBRATION_FILE
+        self._loaded_calibration_fingerprint = inspect_calibration(self.calibration_file).fingerprint
+        self._last_calibration_status = None
+
+    def get_calibration_status(self):
+        config = getattr(self.ed_ap, 'config', {}) if self.ed_ap else {}
+        scanner = isinstance(config, dict) and bool(config.get('ElwScannerEnable', False))
+        check = inspect_calibration(self.calibration_file, elw_scanner=scanner)
+        restart = not self.mock_mode and check.fingerprint != self._loaded_calibration_fingerprint
+        state, message = check.state, check.message
+        blocked = check.blocked_assists
+        if restart:
+            blocked = sorted(ASSIST_REGIONS)
+        if restart and state == 'ready':
+            state = 'restart_required'
+            message = 'Calibration has changed. Restart the Python backend to load the saved regions.'
+        return {'type': 'calibration_status', 'state': state, 'message': message,
+                'issues': check.issues, 'blocked_assists': [] if self.mock_mode else blocked,
+                'restart_required': restart, 'mock': self.mock_mode,
+                'file': str(self.calibration_file), 'help': CALIBRATION_HELP}
 
     def ap_callback(self, msg, body=None):
         """Callback received from EDAutopilot instance."""
@@ -143,6 +164,7 @@ class EDAPEngineServer:
             from ED_AP import EDAutopilot
             import cv2 as engine_cv2
             cv2 = engine_cv2
+            self._loaded_calibration_fingerprint = inspect_calibration(self.calibration_file).fingerprint
             # Publish the initialized engine before starting its worker, so an
             # interrupt can always find and stop it during model initialization.
             self.ed_ap = EDAutopilot(cb=self.ap_callback, do_thread=False)
@@ -192,11 +214,15 @@ class EDAPEngineServer:
                         logger.debug(f"Error updating ship telemetry: {e}")
 
                 await self.broadcast({"type": "telemetry", "data": self.latest_telemetry})
+                calibration = self.get_calibration_status()
+                if calibration != self._last_calibration_status:
+                    self._last_calibration_status = calibration
+                    await self.broadcast(calibration)
 
                 # Stream debug screenshot frame if enabled and CV/Screen available
                 if self.debug_stream_active and self.ed_ap and hasattr(self.ed_ap, "scr"):
                     try:
-                        frame = self.ed_ap.scr.get_screen()
+                        frame = self.ed_ap.scr.get_screen_full()
                         if frame is not None and cv2 is not None:
                             # Resize for fast streaming over WebSocket
                             h, w = frame.shape[:2]
@@ -233,6 +259,17 @@ class EDAPEngineServer:
                 reply["capabilities"] = ["waypoint_load_result"]
             await ws.send(json.dumps(reply))
             return
+
+        if cmd == 'check_calibration' or (cmd.startswith('start_') and cmd[6:] in ASSIST_REGIONS):
+            calibration = self.get_calibration_status()
+            await ws.send(json.dumps(calibration))
+            if cmd == 'check_calibration':
+                return
+            if cmd[6:] in calibration['blocked_assists']:
+                message = f"Cannot start {cmd[6:].replace('_', ' ')} assist. {calibration['message']} {CALIBRATION_HELP}"
+                await ws.send(json.dumps({'type': 'command_error', 'command': cmd, 'message': message}))
+                await self.broadcast({'type': 'log', 'timestamp': datetime.now().strftime('%H:%M:%S'), 'message': message})
+                return
 
         if cmd == "start_fsd":
             if self.ed_ap:
@@ -342,6 +379,7 @@ class EDAPEngineServer:
                 "timestamp": datetime.now().strftime("%H:%M:%S"),
                 "message": "Connected to ED Autopilot Python Backend Engine" + (" (mock mode: simulated controls)" if self.mock_mode else "")
             }))
+            await websocket.send(json.dumps(self.get_calibration_status()))
 
             async for message in websocket:
                 data = None
@@ -356,6 +394,8 @@ class EDAPEngineServer:
                             and isinstance(data.get("request_id"), str)):
                         await websocket.send(json.dumps({"type": "waypoint_load_result", "request_id": data["request_id"],
                                                          "success": False, "message": str(e)}))
+                    elif isinstance(data, dict) and isinstance(data.get('command'), str):
+                        await websocket.send(json.dumps({'type': 'command_error', 'command': data['command'], 'message': str(e)}))
         except ConnectionClosed:
             pass
         finally:

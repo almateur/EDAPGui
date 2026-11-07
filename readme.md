@@ -272,6 +272,8 @@ After updating this file-loading feature, rebuild the dashboard and restart both
 
 If loading reports that the backend is outdated, stop the **Python backend** with Ctrl+C and restart it from the updated checkout (for example, `.\.venv311\Scripts\python.exe .\backend_server.py` in PowerShell). Restarting only Node does not update a Python process that is already running. The dashboard checks support before importing; an unresponsive backend produces a connection error instead of silently waiting for a file-load reply. If a compatible backend still cannot confirm a load, inspect its terminal for the underlying error before retrying.
 
+The dashboard shows calibration readiness above the controls. Missing, corrupt, or empty screen regions block starts for dependent assists and show the affected regions with recovery steps. A saved calibration change requires restarting Python because the engine caches its regions. **Recheck calibration** refreshes this status; stop controls remain available. See [calibration setup and troubleshooting](docs/Calibration.md) if Galaxy Map navigation stalls or screen capture reports a zero-size region.
+
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 
 ### Development checks
@@ -302,6 +304,8 @@ The route editor also has an automated Chromium check in `dashboard/tests/waypoi
 ```sh
 python dashboard/tests/waypoint-editor.browser.py
 ```
+
+With the same browser-test dependencies, `python dashboard/tests/calibration.browser.py` checks calibration warnings, rejected starts, status after page reload, saved changes requiring restart, and stop availability using a stub game engine.
 
 # Running ED_AP
 * With Elite Dangerous (ED) running, start ED_AP:

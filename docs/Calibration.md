@@ -3,6 +3,21 @@ This document explains how to perform calibration for the
 Elite Dangerous Autopilot (GUI) version. 
 Calibration is performed from the Calibration tab:
 
+## Missing calibration in the web dashboard
+
+If an assist opens the Galaxy Map and stalls with `Region has zero or negative size` or a `0 × 0` capture region, check screen-region calibration. A newly created `configs/ocr_calibration.json` contains empty Galaxy Map/System Map bounds until **Save All Calibrations** calculates them from the Codex region. A file existing on disk does not by itself mean calibration is complete.
+
+The web dashboard reports missing, unreadable, or incomplete calibration above the controls and lists the affected regions. It disables starts for dependent assists; the Python backend checks again before starting them. Stop controls remain available. Mock mode is labeled explicitly and permits simulated controls without calibration. The check validates region geometry, not whether an overlay visually matches your game.
+
+To finish calibration on Windows:
+
+1. Stop the Python backend with Ctrl+C. Keep Elite Dangerous running, visible, and in **Borderless** mode.
+2. Open the desktop app using your Python environment, for example `.\.venv311\Scripts\python.exe .\EDAPGui.py` from the repository root. This is the desktop UI used for calibration.
+3. On its **Calibration** tab, calibrate **Screen_Regions.full_panel** (cockpit) and **EDCodex.full_panel** (Codex), following the instructions below. Click **Save All Calibrations** to calculate the map bounds and save all regions.
+4. Close the desktop app and restart the Python backend, for example `.\.venv311\Scripts\python.exe .\backend_server.py`. Reopen the web dashboard or click **Recheck calibration**.
+
+If the JSON file is corrupt, back it up and rename it before opening the desktop app, then repeat calibration. The dashboard does not replace your calibration automatically. If you save or edit calibration while the backend is running, the dashboard reports that a restart is needed: rechecking the file does not reload the engine's cached regions.
+
 ![Calibration.png](../screen/Calibration.png)
 
 ## Region Calibration and Sub-Region Calibration
