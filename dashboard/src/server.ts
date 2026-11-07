@@ -5,6 +5,7 @@ import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket, { WebSocketServer } from 'ws';
 import { CommandMessage, ServerToClientMessage } from './types';
+import { createLocalAccess } from '../security';
 
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
@@ -12,6 +13,8 @@ const ROOT_DIR = path.resolve(__dirname, '../../');
 
 const app = express();
 const server = http.createServer(app);
+const localAccess = createLocalAccess(server);
+app.use(localAccess.middleware);
 
 // Python process state
 let isBuildingPython = false;
@@ -233,7 +236,11 @@ app.post('/api/python/stop', (_req: Request, res: Response) => {
 });
 
 // WebSocket Server for Dashboard frontend browser clients
-const wss = new WebSocketServer({ server });
+const wss = new WebSocketServer({
+  server,
+  maxPayload: 64 * 1024,
+  verifyClient: (info: { req: http.IncomingMessage }) => localAccess.isAllowed(info.req, true)
+});
 
 let engineWs: WebSocket | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
@@ -312,7 +319,10 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('message', (message: WebSocket.RawData) => {
     try {
       const parsed: CommandMessage = JSON.parse(message.toString());
-      console.log('[Dashboard TS Server] Client command:', parsed);
+      if (!parsed || Array.isArray(parsed) || typeof parsed.command !== 'string') {
+        throw new Error('Command must be a JSON object with a command string');
+      }
+      console.log('[Dashboard TS Server] Client command:', parsed.command);
 
       if (parsed.command === 'build_python') {
         buildPythonEnvironment();
@@ -338,11 +348,14 @@ wss.on('connection', (ws: WebSocket) => {
   ws.on('close', () => {
     console.log('[Dashboard TS Server] Browser client disconnected.');
   });
+  ws.on('error', (err: Error) => {
+    console.warn('[Dashboard TS Server] Browser WebSocket error:', err.message);
+  });
 });
 
 // Start connecting to Python engine
 connectToPythonEngine();
 
-server.listen(APP_PORT, () => {
+server.listen(Number(APP_PORT), '127.0.0.1', () => {
   console.log(`[Dashboard TS Server] Vue.js/TS Dashboard UI running on http://localhost:${APP_PORT}`);
 });

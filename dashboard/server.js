@@ -2,12 +2,15 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const WebSocket = require('ws');
+const { createLocalAccess } = require('./security');
 
 const APP_PORT = process.env.PORT || 3000;
 const ENGINE_WS_URL = process.env.ENGINE_WS_URL || 'ws://127.0.0.1:8765';
 
 const app = express();
 const server = http.createServer(app);
+const localAccess = createLocalAccess(server);
+app.use(localAccess.middleware);
 
 // Serve static frontend dashboard assets
 app.use(express.static(path.join(__dirname, 'public')));
@@ -19,7 +22,11 @@ app.get('/api/health', (req, res) => {
 });
 
 // WebSocket Server for Dashboard frontend browser clients
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({
+  server,
+  maxPayload: 64 * 1024,
+  verifyClient: info => localAccess.isAllowed(info.req, true)
+});
 
 let engineWs = null;
 let reconnectTimer = null;
@@ -100,7 +107,10 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const parsed = JSON.parse(message.toString());
-      console.log('[Dashboard Server] Client command:', parsed);
+      if (!parsed || Array.isArray(parsed) || typeof parsed.command !== 'string') {
+        throw new Error('Command must be a JSON object with a command string');
+      }
+      console.log('[Dashboard Server] Client command:', parsed.command);
 
       if (engineWs && engineWs.readyState === WebSocket.OPEN) {
         engineWs.send(JSON.stringify(parsed));
@@ -119,11 +129,14 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[Dashboard Server] Browser client disconnected.');
   });
+  ws.on('error', (err) => {
+    console.warn('[Dashboard Server] Browser WebSocket error:', err.message);
+  });
 });
 
 // Start connecting to Python engine
 connectToPythonEngine();
 
-server.listen(APP_PORT, () => {
+server.listen(Number(APP_PORT), '127.0.0.1', () => {
   console.log(`[Dashboard Server] Dashboard UI running on http://localhost:${APP_PORT}`);
 });
