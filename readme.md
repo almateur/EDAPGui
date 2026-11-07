@@ -200,6 +200,39 @@ npm run server
 
 The dashboard listens on port 3000. Select **Start Python Backend** in the dashboard to start the Python process, then wait for **Connected to EDAP Python Engine**. In mock mode, assist buttons update simulated state and logs; ship/system values remain unknown. **Stop Python Backend** stops the managed process.
 
+### Use the web UI without the game
+
+To test the dashboard, select waypoint files, and simulate assist controls without starting Elite Dangerous or loading OCR/detection models, start the backend explicitly in mock mode from the repository root:
+
+```powershell
+.\.venv311\Scripts\python.exe .\backend_server.py --mock
+```
+
+On Linux, use `venv/bin/python backend_server.py --mock`. Keep that terminal running, start the Node dashboard in another terminal, and wait for `server listening on 127.0.0.1:8765` before loading a file. The UI reports **Mock mode** and treats this backend as started separately. Waypoint validation works; flight control and live screenshots are simulated or unavailable. The `--mock` option requires the updated `backend_server.py`; older versions do not implement it.
+
+For live operation, omit `--mock`, start Elite Dangerous in the supported borderless configuration, keep its window visible, and restart the backend. The server waits for live engine initialization before accepting dashboard connections. `Creating model`/cached-model messages describe OCR initialization, and the optional `ccache` warning is not a startup failure. A missing or minimized game window prevents live screen capture; the excerpt must reach the WebSocket `server listening` message before the dashboard is ready.
+
+### Stopping the backend
+
+Press **Ctrl+C** in its terminal. The backend stops assists, releases held keys through the engine's cleanup, closes its listener, and shuts down voice/overlays. A second interrupt forces exit if cleanup is stuck; once Python handles the first interrupt, a five-second fallback bounds shutdown. A forced exit skips any remaining cleanup.
+
+If text is selected in a Windows terminal, press **Esc** first so Ctrl+C is sent to the program rather than copying the selection. Ctrl+Break is also handled where available. Native OCR code may delay Python signal delivery; for a stuck older process, open another PowerShell terminal and identify the backend process:
+
+```powershell
+Get-CimInstance Win32_Process |
+  Where-Object { $_.Name -eq 'python.exe' -and $_.CommandLine -match 'backend_server\.py' } |
+  Select-Object ProcessId, CommandLine
+```
+
+To stop only the matching backend, enter its `ProcessId` from that list:
+
+```powershell
+$backendProcessId = Read-Host 'Backend ProcessId'
+Stop-Process -Id ([int]$backendProcessId) -Force
+```
+
+### Configuration
+
 The **Build Python Env** button installs the full `requirements.txt`, including Windows-specific packages. For Linux mock development, use the minimal environment above instead of that button. `npm run dev` starts the Vite frontend on port 5173, but it has no configured API/WebSocket proxy; use the compiled Express server for the complete dashboard/backend workflow.
 
 Configuration is optional for the default local setup:
@@ -232,6 +265,8 @@ The network waypoint loader accepts only existing `.json` files under the reposi
 In the web dashboard, **Load File** opens the browser's file picker. Select a waypoint JSON file of at most 1 MiB. The dashboard validates it, imports a uniquely named `waypoints/imported-*.json` copy, and asks the connected Python backend to load that copy. The selected original is not overwritten. The UI reports success only after the backend confirms; invalid files, disconnected backends, and load failures appear below the picker. Imported copies and their progress files are ignored by Git.
 
 After updating this file-loading feature, rebuild the dashboard and restart both the Node dashboard server and the Python backend so the UI and backend use the same confirmation protocol.
+
+If loading reports that the backend is outdated, stop the **Python backend** with Ctrl+C and restart it from the updated checkout (for example, `.\.venv311\Scripts\python.exe .\backend_server.py` in PowerShell). Restarting only Node does not update a Python process that is already running. The dashboard checks support before importing; an unresponsive backend produces a connection error instead of silently waiting for a file-load reply. If a compatible backend still cannot confirm a load, inspect its terminal for the underlying error before retrying.
 
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 

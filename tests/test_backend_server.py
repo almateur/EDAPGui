@@ -7,6 +7,13 @@ import backend_server
 
 
 class BackendLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_late_engine_callback_is_ignored_after_shutdown(self):
+        server = backend_server.EDAPEngineServer()
+        server.loop = asyncio.new_event_loop()
+        server.loop.close()
+        server.shutdown_engine()
+        server.ap_callback('log', 'worker finished after shutdown')
+
     async def test_broadcast_allows_client_membership_changes_during_send(self):
         server = backend_server.EDAPEngineServer()
         newcomer = AsyncMock()

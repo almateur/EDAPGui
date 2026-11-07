@@ -42,6 +42,8 @@ export interface ScreenshotMessage {
 
 export interface PongMessage {
   type: 'pong';
+  request_id?: string;
+  capabilities?: string[];
 }
 
 export interface WaypointLoadResult {

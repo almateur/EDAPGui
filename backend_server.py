@@ -5,26 +5,24 @@ Provides WebSocket interface for Node.js Dashboard (or Web clients) to control
 ED Autopilot, receive real-time telemetry, logs, and live debug screenshots/frames.
 """
 
+import argparse
 import asyncio
 from contextlib import suppress
 import base64
 import json
 import os
 import logging
+import signal
+import threading
 from datetime import datetime
 from pathlib import Path
 
 import websockets
 from websockets.exceptions import ConnectionClosed
 
-# Import EDAutopilot core
-try:
-    from ED_AP import EDAutopilot
-    import cv2
-except Exception as e:
-    print(f"[Engine Backend] Warning importing EDAutopilot/cv2 dependencies: {e}")
-    EDAutopilot = None
-    cv2 = None
+# Game/OCR dependencies are imported only for a live engine, never for --mock,
+# --help, or modules that import the server for protocol tests.
+cv2 = None
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("EDAP_Backend")
@@ -47,10 +45,14 @@ def resolve_waypoint_file(filepath):
     return candidate
 
 class EDAPEngineServer:
-    def __init__(self):
+    def __init__(self, mock: bool = False):
+        self.mock_mode = mock
         self.connected_clients = set()
         self.ed_ap = None
         self.loop = None
+        self._main_task = None
+        self._initializing = False
+        self._stopping = False
         self.latest_telemetry = {
             "status": "Idle",
             "system": "Unknown",
@@ -71,7 +73,13 @@ class EDAPEngineServer:
 
     def ap_callback(self, msg, body=None):
         """Callback received from EDAutopilot instance."""
-        asyncio.run_coroutine_threadsafe(self.handle_ap_callback(msg, body), self.loop)
+        if self._stopping or self.loop is None or self.loop.is_closed():
+            return
+        callback = self.handle_ap_callback(msg, body)
+        try:
+            asyncio.run_coroutine_threadsafe(callback, self.loop)
+        except RuntimeError:
+            callback.close()  # The loop may close between the check and scheduling.
 
     async def handle_ap_callback(self, msg, body):
         payload = None
@@ -125,15 +133,49 @@ class EDAPEngineServer:
 
     def init_engine(self):
         """Initialize EDAutopilot core if available."""
-        if EDAutopilot is not None:
+        global cv2
+        if self.mock_mode:
+            self.latest_telemetry["status"] = "Mock mode"
+            logger.info("Mock mode requested: skipping game, OCR, and detection model initialization.")
+            return
+        logger.info("Initializing live autopilot. Keep Elite Dangerous running and visible; OCR/model loading may take time.")
+        try:
+            from ED_AP import EDAutopilot
+            import cv2 as engine_cv2
+            cv2 = engine_cv2
+            # Publish the initialized engine before starting its worker, so an
+            # interrupt can always find and stop it during model initialization.
+            self.ed_ap = EDAutopilot(cb=self.ap_callback, do_thread=False)
+            self.ed_ap.ap_thread = threading.Thread(target=self.ed_ap.engine_loop,
+                                                    name="EDAutopilot", daemon=True)
+            self.ed_ap.ap_thread.start()
+            logger.info("EDAutopilot initialized successfully.")
+        except Exception as e:
+            self.shutdown_engine()
+            self.mock_mode = True
+            self.latest_telemetry["status"] = "Mock mode"
+            logger.warning("Live autopilot unavailable; running in mock mode: %s", e)
+
+    def shutdown_engine(self):
+        """Stop assists and release the live engine's keys, voice and overlays."""
+        self._stopping = True
+        engine, self.ed_ap = self.ed_ap, None
+        if engine is None:
+            return
+        engine.terminate = True
+        for method, args in [
+            ("set_fsd_assist", (False,)), ("set_sc_assist", (False,)),
+            ("set_waypoint_assist", (False,)), ("set_robigo_assist", (False,)),
+            ("set_dss_assist", (False,)), ("set_afk_combat_assist", (False,)),
+            ("set_single_waypoint_assist", ("", "", False)), ("quit", ()),
+        ]:
             try:
-                self.ed_ap = EDAutopilot(cb=self.ap_callback, do_thread=True)
-                logger.info("EDAutopilot initialized successfully.")
-            except Exception as e:
-                logger.error(f"Failed to initialize EDAutopilot core: {e}")
-                self.ed_ap = None
-        else:
-            logger.warning("EDAutopilot class unavailable. Running backend in mock mode.")
+                getattr(engine, method)(*args)
+            except Exception as error:
+                logger.warning("Engine cleanup %s failed: %s", method, error)
+        worker = getattr(engine, "ap_thread", None)
+        if isinstance(worker, threading.Thread) and worker is not threading.current_thread() and worker.is_alive():
+            worker.join(timeout=2)
 
     async def periodic_telemetry_and_screenshots(self):
         """Periodically broadcast telemetry and debug frame screenshots."""
@@ -185,7 +227,11 @@ class EDAPEngineServer:
             return
 
         if cmd == "ping":
-            await ws.send(json.dumps({"type": "pong"}))
+            reply = {"type": "pong"}
+            if isinstance(data.get("request_id"), str):
+                reply["request_id"] = data["request_id"]
+                reply["capabilities"] = ["waypoint_load_result"]
+            await ws.send(json.dumps(reply))
             return
 
         if cmd == "start_fsd":
@@ -259,7 +305,7 @@ class EDAPEngineServer:
                 self.ed_ap.set_single_waypoint_assist("", "", False)
             for k in self.latest_telemetry["assists"]:
                 self.latest_telemetry["assists"][k] = False
-            self.latest_telemetry["status"] = "Idle"
+            self.latest_telemetry["status"] = "Mock mode" if self.mock_mode else "Idle"
             await self.broadcast({"type": "log", "timestamp": datetime.now().strftime("%H:%M:%S"), "message": "Command: Stop All Assists"})
 
         elif cmd == "load_waypoint_file":
@@ -291,7 +337,7 @@ class EDAPEngineServer:
             await websocket.send(json.dumps({
                 "type": "log",
                 "timestamp": datetime.now().strftime("%H:%M:%S"),
-                "message": "Connected to ED Autopilot Python Backend Engine"
+                "message": "Connected to ED Autopilot Python Backend Engine" + (" (mock mode: simulated controls)" if self.mock_mode else "")
             }))
 
             async for message in websocket:
@@ -317,26 +363,78 @@ class EDAPEngineServer:
         if HOST not in {"127.0.0.1", "::1", "localhost"}:
             raise ValueError("EDAP_HOST must be a loopback address; remote control is unsupported")
         self.loop = asyncio.get_running_loop()
-        self.init_engine()
-
-        telemetry_task = asyncio.create_task(self.periodic_telemetry_and_screenshots())
+        self._main_task = asyncio.current_task()
+        self._stopping = False
+        telemetry_task = None
         try:
+            self._initializing = True
+            try:
+                self.init_engine()
+            finally:
+                self._initializing = False
+            telemetry_task = asyncio.create_task(self.periodic_telemetry_and_screenshots())
             logger.info(f"Starting Python Engine WebSocket Server on {HOST}:{PORT}...")
             # Only the local dashboard talks to this socket. Browsers always
             # supply Origin and must use the dashboard's checked WebSocket.
             async with websockets.serve(
                 self.client_handler, HOST, PORT, origins=[None],
-                max_size=64 * 1024, max_queue=16,
+                max_size=64 * 1024, max_queue=16, close_timeout=1,
             ):
-                await asyncio.Future()  # run forever
+                try:
+                    await asyncio.Future()  # run forever
+                finally:
+                    self.shutdown_engine()
         finally:
-            telemetry_task.cancel()
-            with suppress(asyncio.CancelledError):
-                await telemetry_task
+            self.shutdown_engine()
+            if telemetry_task is not None:
+                telemetry_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await telemetry_task
+
+
+def run_server(server):
+    """Interrupt synchronous startup too; bound shutdown if native code stalls."""
+    interrupted = False
+    previous = {}
+
+    def stop(signum, _frame):
+        nonlocal interrupted
+        if interrupted:
+            os._exit(130)
+        interrupted = True
+        watchdog = threading.Timer(5, lambda: os._exit(130))
+        watchdog.daemon = True
+        watchdog.start()
+        logger.warning("Stopping backend (signal %s). Press Ctrl+C again to force exit; shutdown is limited to 5 seconds.", signum)
+        if not server._initializing and server._main_task is not None and not server._main_task.done():
+            # Cancel only the main task so it closes sockets before the runner
+            # cancels connection tasks. Startup has no await to cancel yet.
+            server.loop.call_soon_threadsafe(server._main_task.cancel)
+        else:
+            raise KeyboardInterrupt
+
+    signals = [signal.SIGINT, signal.SIGTERM]
+    if hasattr(signal, "SIGBREAK"):
+        signals.append(signal.SIGBREAK)
+    for item in signals:
+        previous[item] = signal.signal(item, stop)
+    try:
+        logger.info("Backend process PID: %s", os.getpid())
+        asyncio.run(server.main())
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        if not interrupted:
+            raise
+        logger.info("Server shutting down.")
+    finally:
+        server.shutdown_engine()
+        if not interrupted:
+            for item, handler in previous.items():
+                signal.signal(item, handler)
+    return 130 if interrupted else 0
 
 if __name__ == "__main__":
-    server = EDAPEngineServer()
-    try:
-        asyncio.run(server.main())
-    except KeyboardInterrupt:
-        logger.info("Server shutting down.")
+    parser = argparse.ArgumentParser(description="ED Autopilot WebSocket backend")
+    parser.add_argument("--mock", action="store_true", help="Run the web UI backend without importing game, OCR, or model dependencies; controls are simulated.")
+    args = parser.parse_args()
+    server = EDAPEngineServer(mock=args.mock)
+    raise SystemExit(run_server(server))

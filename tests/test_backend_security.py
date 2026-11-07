@@ -47,6 +47,17 @@ class BackendNetworkSecurityTests(unittest.IsolatedAsyncioTestCase):
                 while json.loads(await ws.recv()).get('type') != 'pong':
                     pass
 
+    async def test_ping_advertises_correlated_waypoint_confirmation_support(self):
+        async with websockets.connect(self.url) as ws:
+            await ws.send(json.dumps({'command': 'ping', 'request_id': 'capability-check'}))
+            async with asyncio.timeout(3):
+                while True:
+                    reply = json.loads(await ws.recv())
+                    if reply.get('type') == 'pong':
+                        break
+            self.assertEqual(reply['request_id'], 'capability-check')
+            self.assertIn('waypoint_load_result', reply['capabilities'])
+
     async def test_browser_origins_cannot_connect_directly_to_engine(self):
         for origin in ['https://attacker.example', 'http://127.0.0.1:3000', 'null']:
             with self.subTest(origin=origin):
