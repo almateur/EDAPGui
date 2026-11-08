@@ -1,4 +1,6 @@
 # Roll, Pitch, Yaw (RPY)
+
+The web dashboard now detects ship/build information automatically and exposes optional learning during assists. See [Automatic ship information and tuning](ShipInformation.md) for the current workflow, engineering data, individual-ship profiles and persistence. Starting rates remain estimates until measured. The historical tuning routines below describe the underlying process; the Gather buttons are not exposed in the current desktop UI.
 The values for Pitch and Roll are critical for proper Autopilot behavior. Yaw is also used, but to a lesser degree.
 Each ship type will have different RPY values that need to be tuned using the instructions below. Once the RPY
 values have been determined for a ship type, EDAP will store the values and will automatically load the correct values

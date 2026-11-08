@@ -70,7 +70,7 @@ Aids with colonization construction projects, determining what commodities are n
 * Focus: ED must have focus when running, so you can't do other things on other windows if AP is active.
            If you change focus, then keyboard events will be sent to the focused window, can mess with the 
            window
-* Control Rates: Must provide the roll, pitch, yaw rates for your ship. See HOWTO-RollPitchYaw.md, start with values from Outfitting for your ship 
+* Control rates are loaded automatically for the detected ship/build. Starting values are estimates; optional feedback tuning measures the response. See [automatic ship information](docs/ShipInformation.md) and [Roll, Pitch, Yaw](docs/RollPitchYaw.md). Outfitting's normal-space values are not supercruise rates.
 * Autodocking: For the AP to recongize the "TO DISENGAGE"  so it will not matter what key you have this mapped to. 
 * Routing: If using Economical Route setting, then may run into problems in jumping.  With Economical, the Stars may not be on the "other-side" of the 
   Sun as with Fastest routing.
@@ -279,6 +279,8 @@ The dashboard shows calibration readiness above the controls. Missing, corrupt, 
 
 See the [security audit and validation report](docs/SecurityAudit.md) for the findings addressed, dependency updates, and remaining validation limits.
 
+The dashboard's **Ship details, engineering & tuning** link shows the full detected loadout, engineering modifiers, reported ship statistics, live flight conditions, and build-specific tuning status. It supports module search, JSON export and optional learning during assists. See [Ship information and profiles](docs/ShipInformation.md) for extraction limits, profile migration and autosave behaviour.
+
 ### Development checks
 
 From the repository root, run the backend lifecycle regression suite using the Python environment with `websockets` installed:
@@ -309,6 +311,8 @@ python dashboard/tests/waypoint-editor.browser.py
 ```
 
 With the same browser-test dependencies, `python dashboard/tests/calibration.browser.py` checks calibration warnings, rejected starts, status after page reload, saved changes requiring restart, and stop availability using a stub game engine.
+
+`python dashboard/tests/ship-info.browser.py` checks journal extraction, engineering inspection, live conditions, JSON export, learning controls, saved tuning and profile isolation across ships/builds. It uses synthetic game files and an injected tuning observation; it does not exercise live Windows capture or flight controls.
 
 # Running ED_AP
 * With Elite Dangerous (ED) running, start ED_AP:

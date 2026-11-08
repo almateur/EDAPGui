@@ -71,6 +71,7 @@ class BackendNetworkSecurityTests(unittest.IsolatedAsyncioTestCase):
             await ws.recv()
             await ws.recv()
             await ws.recv()  # Initial calibration status.
+            await ws.recv()  # Initial ship information.
             await ws.send('x' * (64 * 1024 + 1))
             with self.assertRaises(ConnectionClosedError) as caught:
                 await ws.recv()

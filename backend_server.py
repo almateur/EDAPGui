@@ -74,6 +74,27 @@ class EDAPEngineServer:
         self.calibration_file = CALIBRATION_FILE
         self._loaded_calibration_fingerprint = inspect_calibration(self.calibration_file).fingerprint
         self._last_calibration_status = None
+        self._last_ship_info = None
+
+    def get_ship_info(self):
+        if self.ed_ap is not None:
+            try:
+                info = self.ed_ap.get_ship_info()
+                if isinstance(info, dict):
+                    return {**info, 'mock': self.mock_mode}
+            except Exception as error:
+                logger.debug('Ship information is not available yet: %s', error)
+        return {'type': 'ship_info', 'available': False, 'mock': self.mock_mode,
+                'message': 'Mock mode has no live ship data.' if self.mock_mode else 'Waiting for ship information from the game journal.'}
+
+    async def broadcast_ship_info(self):
+        info = self.get_ship_info()
+        # Status.json changes frequently. Live conditions travel in the small
+        # telemetry message, rather than retransmitting every fitted module.
+        signature = json.dumps({key: value for key, value in info.items() if key != 'raw_status'}, sort_keys=True)
+        if signature != self._last_ship_info:
+            self._last_ship_info = signature
+            await self.broadcast(info)
 
     def get_calibration_status(self):
         config = getattr(self.ed_ap, 'config', {}) if self.ed_ap else {}
@@ -210,10 +231,14 @@ class EDAPEngineServer:
                         self.latest_telemetry["ship"] = ship_state.get("type", "Unknown") or "Unknown"
                         self.latest_telemetry["system"] = ship_state.get("cur_star_system", "Unknown") or "Unknown"
                         self.latest_telemetry["fuel"] = ship_state.get("fuel_percent", 100)
+                        flight = self.ed_ap.get_flight_info()
+                        if isinstance(flight, dict):
+                            self.latest_telemetry['flight'] = flight
                     except Exception as e:
                         logger.debug(f"Error updating ship telemetry: {e}")
 
                 await self.broadcast({"type": "telemetry", "data": self.latest_telemetry})
+                await self.broadcast_ship_info()
                 calibration = self.get_calibration_status()
                 if calibration != self._last_calibration_status:
                     self._last_calibration_status = calibration
@@ -252,11 +277,35 @@ class EDAPEngineServer:
         if not cmd:
             return
 
+        if cmd == 'get_ship_info':
+            await ws.send(json.dumps(self.get_ship_info()))
+            return
+
+        if cmd in {'set_auto_tune_rpy', 'save_ship_tuning'}:
+            if self.ed_ap is None or self.mock_mode:
+                raise ValueError('Ship tuning requires a live backend and current loadout data.')
+            if cmd == 'set_auto_tune_rpy':
+                enabled = data.get('enabled')
+                if not isinstance(enabled, bool):
+                    raise ValueError('Auto-tuning enabled must be true or false.')
+                calibration = self.get_calibration_status()
+                if enabled and calibration['state'] != 'ready':
+                    raise ValueError('Complete screen calibration and restart the backend before enabling auto-tuning.')
+                self.ed_ap.set_auto_tune_rpy(enabled)
+                message = 'Auto-tuning enabled during assists.' if enabled else 'Auto-tuning disabled.'
+            else:
+                self.ed_ap.save_ship_tuning()
+                message = 'Tuning saved for this ship and build.'
+            await ws.send(json.dumps({'type': 'ship_action_result', 'command': cmd, 'success': True,
+                                      'request_id': data.get('request_id'), 'message': message}))
+            await self.broadcast_ship_info()
+            return
+
         if cmd == "ping":
             reply = {"type": "pong"}
             if isinstance(data.get("request_id"), str):
                 reply["request_id"] = data["request_id"]
-                reply["capabilities"] = ["waypoint_load_result"]
+                reply["capabilities"] = ["waypoint_load_result", "ship_info", "ship_build_profiles"]
             await ws.send(json.dumps(reply))
             return
 
@@ -380,6 +429,7 @@ class EDAPEngineServer:
                 "message": "Connected to ED Autopilot Python Backend Engine" + (" (mock mode: simulated controls)" if self.mock_mode else "")
             }))
             await websocket.send(json.dumps(self.get_calibration_status()))
+            await websocket.send(json.dumps(self.get_ship_info()))
 
             async for message in websocket:
                 data = None

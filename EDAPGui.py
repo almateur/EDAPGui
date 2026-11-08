@@ -269,6 +269,7 @@ class APGui:
         # that the main thread is not in main loop.
         self.ed_ap.gui_loaded = True
         self.gui_loaded = True
+        self.update_ship_cfg()
         # Send a log entry which will flush out the buffer.
         self.callback('log', 'ED Autopilot loaded successfully.')
 

@@ -153,6 +153,26 @@ for (const entry of ['dist/server.js', 'server.js']) {
     });
 
     if (entry === 'dist/server.js') {
+      await t.test('full ship loadouts and engineering are replayed to new browser clients', async () => {
+        const first = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => first.terminate());
+        await waitForMessage(first, msg => msg.type === 'process_status');
+        const module = { Slot: 'MainEngines', Item: 'int_engine_size6_class5', Engineering: {
+          BlueprintName: 'Engine_Dirty', Level: 5, Modifiers: Array.from({ length: 40 }, (_, i) => ({ Label: `Modifier${i}`, Value: 1.42, OriginalValue: 1 }))
+        }, FutureField: { preserve: true } };
+        const info = { type: 'ship_info', available: true, mock: false, ship_type: 'python', ship_id: 42,
+          loadout: { Modules: Array.from({ length: 80 }, (_, index) => ({ ...module, Slot: `Slot${index}` })) } };
+        assert.ok(Buffer.byteLength(JSON.stringify(info)) > 64 * 1024);
+        const received = waitForMessage(first, msg => msg.type === 'ship_info');
+        for (const peer of engine.clients) peer.send(JSON.stringify(info));
+        assert.deepEqual(await received, info);
+        const fresh = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => fresh.terminate());
+        assert.deepEqual(await waitForMessage(fresh, msg => msg.type === 'ship_info'), info);
+        first.terminate();
+        fresh.terminate();
+      });
+
       await t.test('calibration status reaches current browsers and is restored after a page reload', async () => {
         const first = new WebSocket(origin.replace('http:', 'ws:'), { origin });
         t.after(() => first.terminate());
@@ -241,6 +261,16 @@ for (const entry of ['dist/server.js', 'server.js']) {
         const status = await reconnected;
         assert.equal(status.running, true);
         assert.equal(status.managed, false);
+        const fresh = new WebSocket(origin.replace('http:', 'ws:'), { origin });
+        t.after(() => fresh.terminate());
+        const shipFrames = [];
+        fresh.on('message', data => { if (JSON.parse(data).type === 'ship_info') shipFrames.push(data); });
+        await waitForMessage(fresh, msg => msg.type === 'process_status');
+        const pong = waitForMessage(fresh, msg => msg.type === 'pong');
+        fresh.send(JSON.stringify({ command: 'ping' }));
+        await pong;
+        assert.deepEqual(shipFrames, [], 'stale ship data must be cleared after backend disconnect');
+        fresh.terminate();
         ws.terminate();
       });
     }

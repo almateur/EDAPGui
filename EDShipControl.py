@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import TypedDict
 
 from EDAP_data import *
-from RPYLineEditor import convert_curve_to_float, convert_curve_to_str, closest_angle
+from RPYLineEditor import closest_angle
 from Screen import set_focus_elite_window
 from StatusParser import StatusParser
 from time import sleep
@@ -66,16 +66,8 @@ class EDShipControl:
         @param rate: The rate of movement to move that angle in deg/seconds.
         @return: N/A
         """
-        throttle = self.get_throttle_demand_dict()
-        if throttle:
-            c = convert_curve_to_float(throttle['RollRate'])
-            # Add the new item. Conversion will sort them.
-            a = closest_angle(angle)
-            c[a] = round(rate, 2)
-            # Convert back to str which will sort the values automatically.
-            s = convert_curve_to_str(c)
-            throttle['RollRate'] = s
-
+        a = closest_angle(angle)
+        if self.ap.record_ship_tuning('RollRate', a, round(rate, 2)):
             self.ap_ckb('log', f'Added a point to the {self.ap.speed_demand} '
                                f'Roll curve at {a} deg, {round(rate, 2)} deg/s.')
 
@@ -86,16 +78,8 @@ class EDShipControl:
         @param rate: The rate of movement to move that angle in deg/seconds.
         @return: N/A
         """
-        throttle = self.get_throttle_demand_dict()
-        if throttle:
-            c = convert_curve_to_float(throttle['PitchRate'])
-            # Add the new item. Conversion will sort them.
-            a = closest_angle(angle)
-            c[a] = round(rate, 2)
-            # Convert back to str which will sort the values automatically.
-            s = convert_curve_to_str(c)
-            throttle['PitchRate'] = s
-
+        a = closest_angle(angle)
+        if self.ap.record_ship_tuning('PitchRate', a, round(rate, 2)):
             self.ap_ckb('log', f'Added a point to the {self.ap.speed_demand} '
                                f'Pitch curve at {a} deg, {round(rate, 2)} deg/s.')
 
@@ -106,15 +90,8 @@ class EDShipControl:
         @param rate: The rate of movement to move that angle in deg/seconds.
         @return: N/A
         """
-        throttle = self.get_throttle_demand_dict()
-        if throttle:
-            c = convert_curve_to_float(throttle['YawRate'])
-            # Add the new item. Conversion will sort them.
-            a = closest_angle(angle)
-            c[a] = round(rate, 2)
-            # Convert back to str which will sort the values automatically.
-            s = convert_curve_to_str(c)
-            throttle['YawRate'] = s
+        a = closest_angle(angle)
+        if self.ap.record_ship_tuning('YawRate', a, round(rate, 2)):
             self.ap_ckb('log', f'Added a point to the {self.ap.speed_demand} '
                                f'Yaw curve at {a} deg, {round(rate, 2)} deg/s.')
 
@@ -157,6 +134,7 @@ class EDShipControl:
         @param cur_deg: Our current angle used for tuning
         @return: N/A.
         """
+        self.ap.require_current_ship_profile()
         close = 8.0
         abs_deg = abs(deg)
         htime = abs_deg / self.ap.rollrate
@@ -250,6 +228,7 @@ class EDShipControl:
         @param cur_deg: Our current angle used for tuning
         @return: N/A.
         """
+        self.ap.require_current_ship_profile()
         close = 0.5
         abs_deg = abs(deg)
         htime = abs_deg / self.ap.pitchrate
@@ -343,6 +322,7 @@ class EDShipControl:
         @param cur_deg: Our current angle used for tuning
         @return: N/A.
         """
+        self.ap.require_current_ship_profile()
         close = 0.5
         abs_deg = abs(deg)
         htime = abs_deg / self.ap.yawrate

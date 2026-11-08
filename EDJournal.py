@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from ship_loadout import ShipLoadout
 from enum import Enum
 from os import environ, listdir
 from os.path import join, isfile, getmtime, abspath
@@ -213,6 +215,8 @@ def check_station_type(station_type: str, station_name: str, station_services: l
 class EDJournal:
     def __init__(self, cb):
         self.ap_ckb = cb
+        self._journal_lock = threading.RLock()
+        self.ship_loadout = ShipLoadout()
         self.last_mod_time = None
         self.log_file = None
         self.current_log = self.get_latest_log()
@@ -273,7 +277,7 @@ class EDJournal:
     def get_latest_log(self, path_logs=None):
         """Returns the full path of the latest (most recent) elite log file (journal) from specified path"""
         if not path_logs:
-            path_logs = get_path(FOLDERID.SavedGames, UserHandle.current) + "\Frontier Developments\Elite Dangerous"
+            path_logs = join(get_path(FOLDERID.SavedGames, UserHandle.current), 'Frontier Developments', 'Elite Dangerous')
         list_of_logs = [join(path_logs, f) for f in listdir(path_logs) if isfile(join(path_logs, f)) and f.startswith('Journal.')]
         if not list_of_logs:
             return None
@@ -296,6 +300,16 @@ class EDJournal:
         try:
             # parse ship status
             log_event = log['event']
+            if self.ship_loadout.consume(log):
+                details = self.ship_loadout.summary()
+                self.ship.update(ship_id=details['ship_id'], ship_profile_key=details['profile_key'],
+                                 ship_build_signature=details['build_signature'], loadout_stale=details['stale'])
+                if details['build_signature'] is None and log_event in {'LoadGame', 'ShipyardSwap', 'ShipyardBuy'}:
+                    self.ship.update(cargo_capacity=None, has_fuel_scoop=None, has_adv_dock_comp=None,
+                                     has_std_dock_comp=None, has_sco_fsd=None, has_supercruise_assist=None)
+                if details['ship_type'] and log_event in {'LoadGame', 'Loadout', 'ShipyardSwap', 'ShipyardBuy'}:
+                    self.ship['type'] = details['ship_type']
+                    self.ship['ship_size'] = get_ship_size(details['ship_type'])
 
             # If fileheader, pull whether running Odyssey or Horizons
             if log_event == 'Fileheader':
@@ -441,12 +455,14 @@ class EDJournal:
             elif log_event == 'Loadout':
                 self.ship['type'] = log['Ship'].lower()
                 self.ship['ship_size'] = get_ship_size(log['Ship'])
-                self.ship['cargo_capacity'] = log['CargoCapacity']
-                self.ship['has_fuel_scoop'] = check_fuel_scoop(log['Modules'])
-                self.ship['has_adv_dock_comp'] = check_adv_docking_computer(log['Modules'])
-                self.ship['has_std_dock_comp'] = check_std_docking_computer(log['Modules'])
-                self.ship['has_sco_fsd'] = check_sco_fsd(log['Modules'])
-                self.ship['has_supercruise_assist'] = check_supercruise_assist(log['Modules'])
+                self.ship['cargo_capacity'] = log.get('CargoCapacity')
+                modules = log.get('Modules')
+                valid = isinstance(modules, list) and bool(modules) and all(isinstance(m, dict) and isinstance(m.get('Item'), str) and isinstance(m.get('Slot'), str) for m in modules)
+                self.ship['has_fuel_scoop'] = check_fuel_scoop(modules) if valid else None
+                self.ship['has_adv_dock_comp'] = check_adv_docking_computer(modules) if valid else None
+                self.ship['has_std_dock_comp'] = check_std_docking_computer(modules) if valid else None
+                self.ship['has_sco_fsd'] = check_sco_fsd(modules) if valid else None
+                self.ship['has_supercruise_assist'] = check_supercruise_assist(modules) if valid else None
 
             # parse fuel
             if 'FuelLevel' in log and self.ship['type'] != 'TestBuggy':
@@ -458,7 +474,8 @@ class EDJournal:
                         self.ship['fuel_capacity'] = log['FuelCapacity']
             if log_event == 'FuelScoop' and 'Total' in log:
                 self.ship['fuel_level'] = log['Total']
-            if self.ship['fuel_level'] and self.ship['fuel_capacity']:
+            if (isinstance(self.ship['fuel_level'], (int, float))
+                    and isinstance(self.ship['fuel_capacity'], (int, float)) and self.ship['fuel_capacity'] > 0):
                 self.ship['fuel_percent'] = round((self.ship['fuel_level'] / self.ship['fuel_capacity'])*100)
             else:
                 self.ship['fuel_percent'] = 10
@@ -590,6 +607,18 @@ class EDJournal:
                 write_construction(const, filepath)
 
     def ship_state(self):
+        with self._journal_lock:
+            return self._read_ship_state()
+
+    def ship_details(self):
+        with self._journal_lock:
+            self._read_ship_state()
+            return {**self.ship_loadout.snapshot(), 'ship_size': self.ship.get('ship_size'),
+                    'equipment': {key: self.ship.get(key) for key in (
+                        'has_fuel_scoop', 'has_adv_dock_comp', 'has_std_dock_comp',
+                        'has_sco_fsd', 'has_supercruise_assist')}}
+
+    def _read_ship_state(self):
         latest_log = self.get_latest_log()
 
         # open journal file if not open yet or there is a more recent journal
@@ -597,16 +626,21 @@ class EDJournal:
             self.open_journal(latest_log)
 
         # Check if file changed
-        if self.get_file_modified_time() == self.last_mod_time:
+        read_mtime = self.get_file_modified_time()
+        if read_mtime == self.last_mod_time:
             return self.ship
 
         cnt = 0
         while True:
+            position = self.log_file.tell()
             line = self.log_file.readline()
             # if end of file then break from while True
             if not line:
                 break
             else:
+                if not line.endswith('\n'):
+                    self.log_file.seek(position)
+                    break
                 log = loads(line)
                 cnt = cnt + 1
                 current_jrnl = self.ship.copy()
@@ -615,7 +649,7 @@ class EDJournal:
                 if self.ship != current_jrnl:
                     logger.debug('Journal*.log: read: '+str(cnt)+' ship: '+str(self.ship))
 
-        self.last_mod_time = self.get_file_modified_time()
+        self.last_mod_time = read_mtime
         return self.ship
 
 
