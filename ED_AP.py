@@ -13,6 +13,7 @@ import cv2
 from EDAPColonizeEditor import read_json_file, write_json_file
 from EDFSS import EDFSS
 from EDPlayerSettings import EDPlayerSettings
+from ship_profile_mixin import ShipProfileMixin
 from MachineLearning import MachLearn, ModelType
 from simple_localization import LocalizationManager
 
@@ -91,7 +92,7 @@ class CompassOffset(TypedDict):
     yaw: float
 
 
-class EDAutopilot:
+class EDAutopilot(ShipProfileMixin):
 
     def __init__(self, cb, do_thread=True):
         self.config = {}
@@ -195,6 +196,8 @@ class EDAutopilot:
 
         self.ap_ckb = cb
 
+        self.current_ship_type = None
+        self.current_ship_cfg = None
         self.load_ship_configs()
 
         self.jump_cnt = 0
@@ -203,8 +206,6 @@ class EDAutopilot:
         self.total_dist_jumped = 0
         self.total_jumps = 0
         self.refuel_cnt = 0
-        self.current_ship_type = None
-        self.current_ship_cfg = None
         self.gui_loaded = False
         # self._nav_cor_x = 0.0  # Nav Point correction to pitch
         # self._nav_cor_y = 0.0  # Nav Point correction to yaw
@@ -445,115 +446,6 @@ class EDAutopilot:
         else:
             write_json_file(self.config, filepath='./configs/AP.json')
 
-    def load_ship_configs(self):
-        """
-        Load all the ship configs from the ship_configs.json file.
-        @return: N/A
-        """
-        shp_cnf = read_json_file(filepath='./configs/ship_configs.json')
-
-        # if we read
-        # it then point to it, otherwise use the default table above
-        if shp_cnf is not None:
-            # Add default values for new entries
-            if 'Ship_Configs' not in shp_cnf:
-                shp_cnf['Ship_Configs'] = dict()
-            self.ship_configs = shp_cnf
-            logger.debug("read Ships Config json:" + str(shp_cnf))
-        else:
-            write_json_file(self.ship_configs, filepath='./configs/ship_configs.json')
-
-        # Load ship configuration with proper hierarchy
-        if self.jn:
-            ship = self.jn.ship_state()['type']
-            if ship:
-                self.load_ship_configuration(ship)
-
-    def update_ship_configs(self):
-        """ Update the user's ship configuration file."""
-        # Check if a ship and not a suit (on foot)
-        if self.current_ship_type in ship_size_map:
-            # Ensure ship entry exists in config
-            if self.current_ship_type not in self.ship_configs['Ship_Configs']:
-                self.ship_configs['Ship_Configs'][self.current_ship_type] = {}
-                logger.debug(f"Created new ship config entry for: {self.current_ship_type}")
-
-            self.current_ship_cfg = self.ship_configs['Ship_Configs'][self.current_ship_type]
-
-            self.current_ship_cfg['PitchRate'] = self.pitchrate
-            self.current_ship_cfg['RollRate'] = self.rollrate
-            self.current_ship_cfg['YawRate'] = self.yawrate
-            self.current_ship_cfg['SunPitchUp+Time'] = self.sunpitchuptime
-
-            write_json_file(self.ship_configs, filepath='./configs/ship_configs.json')
-            logger.debug(f"Saved ship config for: {self.current_ship_type}")
-
-    def load_ship_configuration(self, ship_type):
-        """ Load ship configuration with the following priority:
-            1. User's ship values from ship_configs.json file
-            2. Default ship values from default_ships_cfg_sc_50.json file
-            3. Hardcoded default values
-        """
-        self.ap_ckb('log', f"Loading ship configuration for your {ship_type}")
-
-        # Step 1: Use hardcoded defaults
-        self.rollrate = 80.0
-        self.pitchrate = 33.0
-        self.yawrate = 8.0
-        self.sunpitchuptime = 0.0
-        logger.info(f"Loaded hardcoded default configuration for {ship_type}")
-
-        # Step 2: Try to load defaults from ship file
-        if ship_type in ship_rpy_sc_50:
-            ship_defaults = ship_rpy_sc_50[ship_type]
-            # Use default configuration - this means it's been modified and saved to ship_configs.json
-            self.rollrate = ship_defaults.get('RollRate', 80.0)
-            self.pitchrate = ship_defaults.get('PitchRate', 33.0)
-            self.yawrate = ship_defaults.get('YawRate', 8.0)
-            self.sunpitchuptime = ship_defaults.get('SunPitchUp+Time', 0.0)
-            logger.info(f"Loaded default configuration for {ship_type} from default ship cfg file")
-
-        # Add empty entry to ship_configs for future customization
-        if ship_type not in self.ship_configs['Ship_Configs']:
-            self.ship_configs['Ship_Configs'][ship_type] = dict()
-
-        # Step 3: Check if we have custom config in ship_configs.json (skip if forcing defaults)
-        current_ship_cfg = self.ship_configs['Ship_Configs'][ship_type]
-        # Check if the custom config has actual values (not just empty dict)
-        if any(key in current_ship_cfg for key in ['RollRate', 'PitchRate', 'YawRate', 'SunPitchUp+Time']):
-            # Use custom configuration - this means it's been modified and saved to ship_configs.json
-            self.rollrate = current_ship_cfg.get('RollRate', 80.0)
-            self.pitchrate = current_ship_cfg.get('PitchRate', 33.0)
-            self.yawrate = current_ship_cfg.get('YawRate', 8.0)
-            self.sunpitchuptime = current_ship_cfg.get('SunPitchUp+Time', 0.0)
-            logger.info(f"Loaded your custom configuration for {ship_type} from ship_configs.json")
-
-        for spd_dmd in ['Speed0', 'Speed50', 'Speed100', 'SCSpeed0', 'SCSpeed50', 'SCSpeed100']:
-            # Check RPY Calibration
-            if spd_dmd not in current_ship_cfg:
-                self.ap_ckb('log', "WARNING: Perform Roll/Pitch/Yaw Calibration on this ship.")
-                current_ship_cfg[spd_dmd] = dict()
-
-            spd_dmd_dict = current_ship_cfg[spd_dmd]
-            if 'RollRate' not in spd_dmd_dict:
-                self.ap_ckb('log', "WARNING: Perform Roll Calibration on this ship.")
-                # Default roll rates at 5, 45 and 90 deg
-                spd_dmd_dict['RollRate'] = {"5.0": self.rollrate / 2,
-                                            "45.0": self.rollrate,
-                                            "60.0": self.rollrate}
-            if 'PitchRate' not in spd_dmd_dict:
-                self.ap_ckb('log', "WARNING: Perform Pitch Calibration on this ship.")
-                # Default pitch rates at 0.5, 30 and 90 deg
-                spd_dmd_dict['PitchRate'] = {"0.5": self.pitchrate / 2,
-                                             "30.0": self.pitchrate,
-                                             "60.0": self.pitchrate}
-            if 'YawRate' not in spd_dmd_dict:
-                self.ap_ckb('log', "WARNING: Perform Yaw Calibration on this ship.")
-                # Default yaw rates at 0.5, 30 and 90 deg
-                spd_dmd_dict['YawRate'] = {"0.5": self.yawrate / 2,
-                                           "30.0": self.yawrate,
-                                           "60.0": self.yawrate}
-
     def update_overlay(self):
         """ Draw the overlay data on the ED Window """
         if self.config['OverlayTextEnable']:
@@ -617,7 +509,7 @@ class EDAutopilot:
         self.debug_overlay = self.config['DebugOverlay']
         self.debug_ocr = self.config['DebugOCR']
         self.debug_images = self.config['DebugImages']
-        self.auto_tune_rpy = self.config['AutoTuneRPYRates']
+        self.auto_tune_rpy = bool(self.config['AutoTuneRPYRates'] and self.ship_profile_manager.key)
 
     def draw_match_rect(self, img, pt1, pt2, color, thick):
         """ Draws the matching rectangle within the image. """
@@ -2970,6 +2862,7 @@ class EDAutopilot:
         hang on exit have then kill python exec.
         @return:
         """
+        self.ship_profile_manager.save(force=True)
         self.keys.release_all_keys()
         if self.vce != None:
             self.vce.quit()
@@ -2983,6 +2876,7 @@ class EDAutopilot:
         @return:
         """
         while not self.terminate:
+            self.refresh_ship_profile()
             # TODO - Remove these show compass/target all the time
             if self.debug_show_compass_overlay:
                 self.get_nav_offset(self.scrReg)
@@ -3019,6 +2913,8 @@ class EDAutopilot:
                     logger.debug("Caught stop exception")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: FSD Assist stopped: {e}')
                     logger.debug("FSD Assist trapped generic:"+str(e))
                     print("Trapped generic:"+str(e))
                     traceback.print_exc()
@@ -3050,6 +2946,8 @@ class EDAutopilot:
                     logger.debug("Caught stop exception")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:"+str(e))
                     logger.debug("SC Assist trapped generic:"+str(e))
                     traceback.print_exc()
@@ -3075,6 +2973,8 @@ class EDAutopilot:
                     logger.debug("Caught stop exception")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:"+str(e))
                     logger.debug("Waypoint Assist trapped generic:"+str(e))
                     traceback.print_exc()
@@ -3094,6 +2994,8 @@ class EDAutopilot:
                     logger.debug("Caught stop exception")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:"+str(e))
                     logger.debug("Robigo Assist trapped generic:"+str(e))
                     traceback.print_exc()
@@ -3111,6 +3013,8 @@ class EDAutopilot:
                     logger.debug("Stopping afk_combat")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:" + str(e))
                     logger.debug("AFK Combat Assist trapped generic:" + str(e))
                     traceback.print_exc()
@@ -3130,6 +3034,8 @@ class EDAutopilot:
                     logger.debug("Stopping DSS Assist")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:" + str(e))
                     logger.debug("DSS Assist trapped generic:" + str(e))
                     traceback.print_exc()
@@ -3146,6 +3052,8 @@ class EDAutopilot:
                     logger.debug("Stopping Single Waypoint Assist")
                     self.keys.release_all_keys()
                 except Exception as e:
+                    self.keys.release_all_keys()
+                    self.ap_ckb('log', f'ERROR: Assist stopped: {e}')
                     print("Trapped generic:" + str(e))
                     logger.debug("Single Waypoint Assist trapped generic:" + str(e))
                     traceback.print_exc()
@@ -3154,51 +3062,6 @@ class EDAutopilot:
                 self.single_waypoint_enabled = False
                 self.ap_ckb('single_waypoint_stop')
                 self.update_overlay()
-
-            # Check once EDAPGUI loaded to prevent errors logging to the listbox before loaded
-            if self.gui_loaded:
-                # Check if ship has changed
-                ship = self.jn.ship_state()['type']
-                # Check if a ship and not a suit (on foot)
-                if ship not in ship_size_map:
-                    # Clear current ship
-                    self.current_ship_type = None
-                    self.current_ship_cfg = None
-                else:
-                    ship_fullname = get_ship_fullname(ship)
-
-                    # Check if ship changed or just loaded
-                    if ship != self.current_ship_type:
-                        if self.current_ship_type is not None:
-                            cur_ship_fullname = get_ship_fullname(self.current_ship_type)
-                            self.ap_ckb('log+vce', f"Switched ship from your {cur_ship_fullname} to your {ship_fullname}.")
-                        else:
-                            self.ap_ckb('log+vce', f"Welcome aboard your {ship_fullname}.")
-
-                        # Check for fuel scoop and advanced docking computer
-                        if not self.jn.ship_state()['has_fuel_scoop']:
-                            self.ap_ckb('log+vce', f"Warning, your {ship_fullname} is not fitted with a Fuel Scoop.")
-                        if not self.jn.ship_state()['has_adv_dock_comp']:
-                            self.ap_ckb('log+vce', f"Warning, your {ship_fullname} is not fitted with an Advanced Docking Computer.")
-                        if self.jn.ship_state()['has_std_dock_comp']:
-                            self.ap_ckb('log+vce', f"Warning, your {ship_fullname} is fitted with a Standard Docking Computer.")
-                        if self.jn.ship_state()['has_supercruise_assist']:
-                            self.ap_ckb('log+vce', f"Your {ship_fullname} is fitted with a Supercruise Assist module.")
-
-                        # Store ship for change detection BEFORE loading config and GUI update
-                        self.current_ship_type = ship
-
-                        # Load ship configuration with proper hierarchy
-                        self.load_ship_configuration(ship)
-
-                        # Update current ship config
-                        self.current_ship_cfg = self.ship_configs['Ship_Configs'][self.current_ship_type]
-
-                        # Update GUI with ship config
-                        self.ap_ckb('update_ship_cfg')
-
-                        # Reload templates for this ship
-                        self.templ.reload_templates(self.scr.scaleX, self.scr.scaleY)
 
             self.update_overlay()
             cv2.waitKey(10)

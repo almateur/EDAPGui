@@ -2,12 +2,19 @@
 import { ref, reactive, onMounted, onBeforeUnmount, computed, nextTick } from 'vue';
 import WaypointRouteEditor from './WaypointRouteEditor.vue';
 import CalibrationStatus from './CalibrationStatus.vue';
+import ShipInfo from './ShipInfo.vue';
 import { parseWaypointRoute, serializeWaypointRoute, MAX_WAYPOINT_BYTES, type WaypointRoute } from './waypointRoute';
-import type { TelemetryData, ServerToClientMessage, CommandMessage, CalibrationStatusMessage } from './types';
+import type { TelemetryData, ServerToClientMessage, CommandMessage, CalibrationStatusMessage, ShipInfoMessage } from './types';
 
 // Reactive state
 const isConnected = ref(false);
 const calibrationStatus = ref<CalibrationStatusMessage | null>(null);
+const shipInfo = ref<ShipInfoMessage | null>(null);
+const shipActionPending = ref(false);
+const shipActionMessage = ref('');
+const shipActionError = ref(false);
+let shipRequest: string | null = null;
+let shipActionTimer: ReturnType<typeof setTimeout> | null = null;
 const assistError = ref('');
 const statusMessage = ref('Connecting to Engine...');
 const isBuildingPython = ref(false);
@@ -101,6 +108,9 @@ function initWebSocket(): void {
     if (pendingWaypointRequest) finishWaypointLoad('Connection lost before the waypoint file was loaded.', true);
     isConnected.value = false;
     calibrationStatus.value = null;
+    shipInfo.value = null;
+    delete telemetry.flight;
+    if (shipActionPending.value) finishShipAction('Connection lost before ship tuning was confirmed.', true);
     hasProcessStatus.value = false;
     isBackendRunning.value = false;
     isBackendManaged.value = false;
@@ -118,12 +128,29 @@ function handleServerMessage(msg: ServerToClientMessage): void {
   if (msg.type === 'engine_status') {
     isConnected.value = msg.connected;
     statusMessage.value = msg.message;
-    if (!msg.connected) calibrationStatus.value = null;
-    else if (!calibrationStatus.value) sendCommand('check_calibration');
+    if (!msg.connected) {
+      calibrationStatus.value = null;
+      shipInfo.value = null;
+      delete telemetry.flight;
+      if (shipActionPending.value) finishShipAction('The backend disconnected before confirming ship tuning.', true);
+    } else {
+      if (!calibrationStatus.value) sendCommand('check_calibration');
+      if (!shipInfo.value) sendCommand('get_ship_info');
+    }
     if (!msg.connected && pendingWaypointRequest) finishWaypointLoad('The Python backend disconnected before loading the file.', true);
   } else if (msg.type === 'calibration_status') {
     calibrationStatus.value = msg;
     if (msg.state === 'ready') assistError.value = '';
+  } else if (msg.type === 'ship_info') {
+    if (msg.profile?.key !== shipInfo.value?.profile?.key || msg.ship_id !== shipInfo.value?.ship_id) {
+      shipActionMessage.value = '';
+      shipActionError.value = false;
+    }
+    shipInfo.value = msg;
+  } else if (msg.type === 'ship_action_result' && msg.request_id === shipRequest) {
+    finishShipAction(msg.message, !msg.success);
+  } else if (msg.type === 'command_error' && ['set_auto_tune_rpy', 'save_ship_tuning'].includes(msg.command)) {
+    finishShipAction(msg.message, true);
   } else if (msg.type === 'command_error') {
     assistError.value = msg.message;
     appendLog(new Date().toLocaleTimeString(), msg.message, true);
@@ -181,6 +208,27 @@ function sendCommand(command: string, extraData: Record<string, any> = {}): bool
 function buildPythonEngine(): void {
   appendLog(new Date().toLocaleTimeString(), 'Initiating Python build & dependency setup...', true);
   sendCommand('build_python');
+}
+
+function finishShipAction(message: string, error = false): void {
+  if (shipActionTimer) clearTimeout(shipActionTimer);
+  shipActionTimer = null;
+  shipRequest = null;
+  shipActionPending.value = false;
+  shipActionMessage.value = message;
+  shipActionError.value = error;
+}
+
+function shipAction(command: string, enabled?: boolean): void {
+  if (shipActionPending.value) return;
+  shipRequest = crypto.randomUUID();
+  shipActionPending.value = true;
+  shipActionMessage.value = '';
+  shipActionError.value = false;
+  shipActionTimer = setTimeout(() => finishShipAction('The backend did not confirm the tuning change. Check its terminal before retrying.', true), 10000);
+  if (!sendCommand(command, { request_id: shipRequest, ...(enabled === undefined ? {} : { enabled }) })) {
+    finishShipAction('Connect the backend before changing ship tuning.', true);
+  }
 }
 
 function startPythonBackend(): void {
@@ -420,6 +468,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
               <span class="value">{{ telemetry.jump_info }}</span>
             </div>
           </div>
+          <a v-if="isConnected" class="ship-details-link" href="#ship-info-heading">Ship details, engineering &amp; tuning ↓</a>
         </div>
 
         <!-- Control Panel Card -->
@@ -542,11 +591,13 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', protectRouteEdi
         </template>
         <p v-else class="route-empty">Load a waypoint file to see its travel order and edit destinations, bookmarks, and trading. You can plan routes while the backend is offline.</p>
       </section>
+      <ShipInfo :info="shipInfo" :flight="telemetry.flight" :connected="isConnected" :calibration-ready="calibrationStatus?.state === 'ready'" :pending="shipActionPending" :message="shipActionMessage" :error="shipActionError" @refresh="sendCommand('get_ship_info')" @tune="shipAction('set_auto_tune_rpy', $event)" @save="shipAction('save_ship_tuning')" />
     </main>
   </div>
 </template>
 
 <style scoped>
+.ship-details-link { display: inline-block; color: var(--accent-cyan); font-size: .85rem; margin-top: 14px; }
 .control-card button:disabled { opacity: .45; cursor: not-allowed; }
 .assist-error { color: var(--accent-red); margin-bottom: 12px; overflow-wrap: anywhere; }
 .waypoint-card { grid-column: 1 / -1; min-width: 0; }

@@ -1,0 +1,59 @@
+{
+  "timestamp": "2026-11-08T10:00:00Z",
+  "event": "Loadout",
+  "Ship": "python",
+  "ShipID": 42,
+  "ShipName": "Test Explorer",
+  "ShipIdent": "TEST42",
+  "HullValue": 56978180,
+  "ModulesValue": 15000000,
+  "HullHealth": 0.98,
+  "UnladenMass": 540,
+  "CargoCapacity": 64,
+  "FuelCapacity": {"Main": 32, "Reserve": 0.63},
+  "Rebuy": 3598909,
+  "MaxJumpRange": 40.2,
+  "FutureShipField": {"preserve": true},
+  "Modules": [
+    {
+      "Slot": "MainEngines",
+      "Item": "int_engine_size6_class5",
+      "Item_Localised": "6A Thrusters",
+      "On": true,
+      "Priority": 0,
+      "Health": 0.95,
+      "Value": 16000000,
+      "Engineering": {
+        "Engineer": "Professor Palin",
+        "EngineerID": 300009,
+        "BlueprintName": "Engine_Dirty",
+        "Level": 5,
+        "Quality": 1,
+        "ExperimentalEffect": "special_engine_drag_drives",
+        "ExperimentalEffect_Localised": "Drag Drives",
+        "Modifiers": [
+          {"Label": "EngineOptPerformance", "Value": 1.42, "OriginalValue": 1, "LessIsGood": false},
+          {"Label": "EngineOptMass", "Value": 1360, "OriginalValue": 1600, "LessIsGood": false},
+          {"Label": "Mass", "Value": 40, "OriginalValue": 40, "LessIsGood": true}
+        ]
+      },
+      "FutureModuleField": {"keep": [1, 2, 3]}
+    },
+    {
+      "Slot": "FrameShiftDrive",
+      "Item": "int_hyperdrive_overcharge_size5_class5",
+      "On": true,
+      "Priority": 0,
+      "Health": 1,
+      "Engineering": {
+        "Engineer": "Felicity Farseer",
+        "BlueprintName": "FSD_LongRange",
+        "Level": 5,
+        "Quality": 0.95,
+        "ExperimentalEffect": "special_fsd_massmanager",
+        "Modifiers": [{"Label": "FSDOptimalMass", "Value": 1800, "OriginalValue": 1050, "LessIsGood": false}]
+      }
+    },
+    {"Slot": "Slot01_Size6", "Item": "int_cargorack_size6_class1", "On": true, "Priority": 1, "Health": 1}
+  ]
+}

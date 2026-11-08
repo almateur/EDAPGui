@@ -4,7 +4,7 @@ import path from 'path';
 import fs from 'fs';
 import { spawn, ChildProcess } from 'child_process';
 import WebSocket, { WebSocketServer } from 'ws';
-import { CommandMessage, ProcessStatusMessage, ServerToClientMessage, CalibrationStatusMessage } from './types';
+import { CommandMessage, ProcessStatusMessage, ServerToClientMessage, CalibrationStatusMessage, ShipInfoMessage } from './types';
 import { createLocalAccess } from '../security';
 import { importWaypointFile, MAX_WAYPOINT_BYTES, WaypointFileError } from './waypointFiles';
 import { supportsWaypointConfirmation } from './backendProtocol';
@@ -303,6 +303,7 @@ const wss = new WebSocketServer({
 
 let engineWs: WebSocket | null = null;
 let calibrationStatus: CalibrationStatusMessage | null = null;
+let shipInfo: ShipInfoMessage | null = null;
 let reconnectTimer: NodeJS.Timeout | null = null;
 
 function connectToPythonEngine(): void {
@@ -328,6 +329,7 @@ function connectToPythonEngine(): void {
     try {
       const parsed: ServerToClientMessage = JSON.parse(data.toString());
       if (parsed.type === 'calibration_status') calibrationStatus = parsed;
+      if (parsed.type === 'ship_info') shipInfo = parsed;
       broadcastToClients(parsed);
     } catch (err) {
       console.error('[Dashboard TS Server] Error parsing message from Python Engine:', err);
@@ -336,6 +338,7 @@ function connectToPythonEngine(): void {
 
   engineWs.on('close', () => {
     calibrationStatus = null;
+    shipInfo = null;
     console.log('[Dashboard TS Server] Disconnected from Python Engine. Retrying in 3s...');
     broadcastToClients({
       type: 'engine_status',
@@ -381,6 +384,7 @@ wss.on('connection', (ws: WebSocket) => {
   ws.send(JSON.stringify(statusMsg));
   ws.send(JSON.stringify(getProcessStatus()));
   if (connected && calibrationStatus) ws.send(JSON.stringify(calibrationStatus));
+  if (connected && shipInfo) ws.send(JSON.stringify(shipInfo));
 
   ws.on('message', (message: WebSocket.RawData) => {
     try {
